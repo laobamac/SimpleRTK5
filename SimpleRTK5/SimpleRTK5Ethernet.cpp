@@ -533,7 +533,7 @@ IOReturn SimpleRTK5::outputStart(IONetworkInterface *interface, IOOptionBits opt
         firstDesc->opts1 |= DescOwn;
     }
     /* 更新尾部指针 */
-    WriteReg16(SW_TAIL_PTR0_8125, txTailPtr0 & 0xffff);
+    WriteReg16(SW_TAIL_PTR0_8126, txTailPtr0 & 0xffff);
 
     result = (txNumFreeDesc > (kMaxSegs + 3)) ? kIOReturnSuccess : kIOReturnNoResources;
     
@@ -938,7 +938,6 @@ IOReturn SimpleRTK5::selectMedium(const IONetworkMedium *medium)
                 flowCtl = kFlowControlOn;
                 break;
 
-            /* 增加5G速率支持 */
             case MEDIUM_INDEX_5000FD:
                 speed = SPEED_5000;
                 duplex = DUPLEX_FULL;
@@ -1043,7 +1042,7 @@ void SimpleRTK5::pciErrorInterrupt()
 void SimpleRTK5::txInterrupt()
 {
     mbuf_t m;
-    UInt32 nextClosePtr = ReadReg16(HW_CLO_PTR0_8125);
+    UInt32 nextClosePtr = ReadReg16(HW_CLO_PTR0_8126);
     UInt32 oldDirtyIndex = txDirtyDescIndex;
     UInt32 numDone;
 
@@ -1196,7 +1195,6 @@ void SimpleRTK5::checkLinkStatus()
             flowCtl = kFlowControlOff;
         }
 
-        /* 增加5G速率判断 */
         if (currLinkState & _5000bpsF) {
             speed = SPEED_5000;
             duplex = DUPLEX_FULL;
@@ -1272,8 +1270,8 @@ void SimpleRTK5::interruptHandler(OSObject *client, IOInterruptEventSource *src,
     }
     if (!test_bit(__POLL_MODE, &stateFlags) &&
         !test_and_set_bit(__POLLING, &stateFlags)) {
-        /* 接收中断 */
-        if (status & (RxOK | RxDescUnavail)) {
+        /* Rx interrupt */
+        if (status & (RxOK | RxDescUnavail | RxFIFOOver)) {
             packets = rxInterrupt(netif, kNumRxDesc, NULL, NULL);
             
             if (packets)
@@ -1284,7 +1282,7 @@ void SimpleRTK5::interruptHandler(OSObject *client, IOInterruptEventSource *src,
             if (spareNum < kRxNumSpareMbufs)
                 refillSpareBuffers();
         }
-        /* 发送中断 */
+        /* Tx interrupt */
         if (status & (TxOK | RxOK | PCSTimeout)) {
             txInterrupt();
             
@@ -1292,8 +1290,8 @@ void SimpleRTK5::interruptHandler(OSObject *client, IOInterruptEventSource *src,
                 etherStats->dot3TxExtraEntry.interrupts++;
         }
         if (status & (TxOK | RxOK)) {
-            WriteReg32(TIMER_INT0_8125, 0x5000);
-            WriteReg32(TCTR0_8125, 0x5000);
+            WriteReg32(TIMER_INT0_8125, 0x2600);
+            WriteReg32(TCTR0_8125, 0x2600);
             intrMask = intrMaskTimer;
         } else if (status & PCSTimeout) {
             WriteReg32(TIMER_INT0_8125, 0x0000);
