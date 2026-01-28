@@ -1,8 +1,8 @@
 //
+//  SimpleRTK5Ethernet.hpp
 //  SimpleRTK5
 //
-//  Created by laobamac on 08.11.25.
-//  Copyright © 2025 laobamac. All rights reserved.
+//  Created by laobamac on 2025/10/7.
 //
 
 #include <IOKit/IODMACommand.h>
@@ -15,7 +15,7 @@
 #define DebugLog(args...)
 #endif
 
-#define    RELEASE(x)    if(x){(x)->release();(x)=NULL;}
+#define RELEASE(x) if(x){(x)->release();(x)=NULL;}
 
 #define WriteReg8(reg, val8)    _OSWriteInt8((baseAddr), (reg), (val8))
 #define WriteReg16(reg, val16)  OSWriteLittleInt16((baseAddr), (reg), (val16))
@@ -26,6 +26,7 @@
 
 #define super IOEthernetController
 
+/* 介质索引定义 */
 enum
 {
     MEDIUM_INDEX_AUTO = 0,
@@ -42,13 +43,14 @@ enum
     MEDIUM_INDEX_1000FDFCEEE,
     MEDIUM_INDEX_2500FD,
     MEDIUM_INDEX_2500FDFC,
-    MEDIUM_INDEX_5000FD,
-    MEDIUM_INDEX_5000FDFC,
+    MEDIUM_INDEX_5000FD,        /* 5G 全双工 */
+    MEDIUM_INDEX_5000FDFC,      /* 5G 全双工带流控 */
     MEDIUM_INDEX_COUNT
 };
 
 #define MBit 1000000ULL
 
+/* 速率常量定义 */
 enum {
     kSpeed5000MBit = 5000*MBit,
     kSpeed2500MBit = 2500*MBit,
@@ -104,14 +106,14 @@ struct tcp_hdr_be {
     UInt16 uptr;
 };
 
-
+/* 驱动状态标志 */
 enum RtlStateFlags {
-    __ENABLED = 0,      /* driver is enabled */
-    __LINK_UP = 1,      /* link is up */
-    __PROMISC = 2,      /* promiscuous mode enabled */
-    __M_CAST = 3,       /* multicast mode enabled */
-    __POLL_MODE = 4,    /* poll mode is active */
-    __POLLING = 5,      /* poll routine is polling */
+    __ENABLED = 0,      /* 驱动启用 */
+    __LINK_UP = 1,      /* 链路连接 */
+    __PROMISC = 2,      /* 混杂模式 */
+    __M_CAST = 3,       /* 组播模式 */
+    __POLL_MODE = 4,    /* 轮询模式启用 */
+    __POLLING = 5,      /* 正在轮询 */
 };
 
 enum RtlStateMask {
@@ -123,25 +125,21 @@ enum RtlStateMask {
     __POLLING_M = (1 << __POLLING),
 };
 
-/* RTL8125's Rx descriptor. */
+/* 接收描述符 */
 typedef struct RtlRxDesc {
     UInt32 opts1;
     UInt32 opts2;
     UInt64 addr;
 } RtlRxDesc;
 
-/* RTL8125's Tx descriptor. */
+/* 发送描述符 */
 typedef struct RtlTxDesc {
     UInt32 opts1;
     UInt32 opts2;
-    UInt64 addr; /*
-    UInt32 reserved0;
-    UInt32 reserved1;
-    UInt32 reserved2;
-    UInt32 reserved3; */
+    UInt64 addr;
 } RtlTxDesc;
 
-/* RTL8125's statistics dump data structure */
+/* 统计数据结构 */
 typedef struct RtlStatData {
     UInt64    txPackets;
     UInt64    rxPackets;
@@ -159,13 +157,11 @@ typedef struct RtlStatData {
 } RtlStatData;
 
 #define kTransmitQueueCapacity  1024
-
-/* With up to 40 segments we should be on the save side. */
 #define kMaxSegs 40
 
-/* The number of descriptors must be a power of 2. */
-#define kNumTxDesc    1024    /* Number of Tx descriptors */
-#define kNumRxDesc    512    /* Number of Rx descriptors */
+/* 描述符数量定义 */
+#define kNumTxDesc    1024
+#define kNumRxDesc    512
 #define kTxLastDesc    (kNumTxDesc - 1)
 #define kRxLastDesc    (kNumRxDesc - 1)
 #define kTxDescMask    (kNumTxDesc - 1)
@@ -175,7 +171,7 @@ typedef struct RtlStatData {
 #define kRxBufArraySize (kNumRxDesc * sizeof(mbuf_t))
 #define kTxBufArraySize (kNumTxDesc * sizeof(mbuf_t))
 
-/* This is the receive buffer size (must be large enough to hold a packet). */
+/* 缓冲区大小 */
 #define kRxBufferSize4K    4096
 #define kRxBufferSize9K    9020
 #define kRxNumSpareMbufs    150
@@ -183,20 +179,20 @@ typedef struct RtlStatData {
 #define kMaxMtu 9000
 #define kMaxPacketSize (kMaxMtu + ETH_HLEN + ETH_FCS_LEN)
 
-/* statitics timer period in ms. */
+/* 统计更新间隔 (ms) */
 #define kTimeoutMS 1000
 
-/* Treshhold value to wake a stalled queue */
+/* 发送队列唤醒阈值 */
 #define kTxQueueWakeTreshhold (kNumTxDesc / 10)
 
-/* transmitter deadlock treshhold in seconds. */
-#define kTxDeadlockTreshhold 6
+/* 发送死锁检测阈值 (秒) */
+#define kTxDeadlockTreshhold 266
 #define kTxCheckTreshhold (kTxDeadlockTreshhold - 1)
 
-/* MSS value position */
+/* MSS 移位 */
 #define MSSShift_8125 18
 
-/* This definitions should have been in IOPCIDevice.h. */
+/* PCI 属性常量 */
 enum
 {
     kIOPCIPMCapability = 2,
@@ -211,12 +207,12 @@ enum
 
 enum
 {
-    kIOPCIELinkCtlASPM = 0x0003,    /* ASPM Control */
-    kIOPCIELinkCtlL0s = 0x0001,     /* L0s Enable */
-    kIOPCIELinkCtlL1 = 0x0002,      /* L1 Enable */
-    kIOPCIELinkCtlClkPM = 0x0004,   /* Clock PM Enable */
-    kIOPCIELinkCtlCcc = 0x0040,     /* Common Clock Configuration */
-    kIOPCIELinkCtlClkReqEn = 0x100, /* Enable clkreq */
+    kIOPCIELinkCtlASPM = 0x0003,
+    kIOPCIELinkCtlL0s = 0x0001,
+    kIOPCIELinkCtlL1 = 0x0002,
+    kIOPCIELinkCtlClkPM = 0x0004,
+    kIOPCIELinkCtlCcc = 0x0040,
+    kIOPCIELinkCtlClkReqEn = 0x100,
 };
 
 enum
@@ -226,6 +222,7 @@ enum
     kPowerStateCount
 };
 
+/* 驱动参数键名 */
 #define kParamName "Driver Parameters"
 #define kEnableEeeName "enableEEE"
 #define kEnableCSO6Name "enableCSO6"
@@ -236,7 +233,6 @@ enum
 #define kDriverVersionName "Driver Version"
 #define kFallbackName "fallbackMAC"
 #define kNameLenght 64
-
 #define kEnableRxPollName "rxPolling"
 
 extern const struct RTLChipInfo rtl_chip_info[];
@@ -247,18 +243,18 @@ class SimpleRTK5 : public super
     OSDeclareDefaultStructors(SimpleRTK5)
     
 public:
-    /* IOService (or its superclass) methods. */
+    /* IOService 方法 */
     virtual bool start(IOService *provider) override;
     virtual void stop(IOService *provider) override;
     virtual bool init(OSDictionary *properties) override;
     virtual void free() override;
     
-    /* Power Management Support */
+    /* 电源管理 */
     virtual IOReturn registerWithPolicyMaker(IOService *policyMaker) override;
     virtual IOReturn setPowerState(unsigned long powerStateOrdinal, IOService *policyMaker ) override;
     virtual void systemWillShutdown(IOOptionBits specifier) override;
 
-    /* IONetworkController methods. */
+    /* 网络控制器方法 */
     virtual IOReturn enable(IONetworkInterface *netif) override;
     virtual IOReturn disable(IONetworkInterface *netif) override;
     
@@ -279,7 +275,7 @@ public:
     virtual bool createWorkLoop() override;
     virtual IOWorkLoop* getWorkLoop() const override;
     
-    /* Methods inherited from IOEthernetController. */
+    /* 以太网控制器方法 */
     virtual IOReturn getHardwareAddress(IOEthernetAddress *addr) override;
     virtual IOReturn setHardwareAddress(const IOEthernetAddress *addr) override;
     virtual IOReturn setPromiscuousMode(bool active) override;
@@ -323,14 +319,14 @@ private:
     void setLinkDown();
     bool txHangCheck();
 
-    /* Hardware initialization methods. */
+    /* RTL8126 专用硬件方法 */
     IOReturn identifyChip();
-    bool initRTL8125();
-    void enableRTL8125();
-    void disableRTL8125();
-    void setupRTL8125();
+    bool initRTL8126();
+    void enableRTL8126();
+    void disableRTL8126();
+    void setupRTL8126();
     void setOffset79(UInt8 setting);
-    void restartRTL8125();
+    void restartRTL8126();
     void setPhyMedium();
     UInt8 csiFun0ReadByte(UInt32 addr);
     void csiFun0WriteByte(UInt32 addr, UInt8 value);
@@ -338,20 +334,21 @@ private:
     void disablePCIOffset99();
     void initPCIOffset99();
     void setPCI99_180ExitDriverPara();
+    void setPCI99_ExitDriverPara();
     void hardwareD3Para();
     UInt16 getEEEMode();
     void exitOOB();
     void powerDownPLL();
     void configPhyHardware();
+    /* 仅保留 RTL8126 PHY 配置 */
     void configPhyHardware8126a1();
     void configPhyHardware8126a2();
     void configPhyHardware8126a3();
 
-    /* Descriptor related methods. */
     inline void getChecksumResult(mbuf_t m, UInt32 status1, UInt32 status2);
     
-    /* Watchdog timer method. */
-    void timerActionRTL8125(IOTimerEventSource *timer);
+    /* RTL8126 看门狗 */
+    void timerActionRTL8126(IOTimerEventSource *timer);
 
 private:
     IOWorkLoop *workLoop;
@@ -368,7 +365,7 @@ private:
     IOMapper *mapper;
     volatile void *baseAddr;
     
-    /* transmitter data */
+    /* 发送相关数据 */
     IOBufferMemoryDescriptor *txBufDesc;
     IOPhysicalAddress64 txPhyAddr;
     IODMACommand *txDescDmaCmd;
@@ -384,7 +381,7 @@ private:
     UInt32 txClosePtr0;
     SInt32 txNumFreeDesc;
 
-    /* receiver data */
+    /* 接收相关数据 */
     IOBufferMemoryDescriptor *rxBufDesc;
     IOPhysicalAddress64 rxPhyAddr;
     IODMACommand *rxDescDmaCmd;
@@ -401,12 +398,12 @@ private:
     UInt32 rxConfigMask;
     SInt32 spareNum;
 
-    /* power management data */
+    /* 电源管理数据 */
     unsigned long powerState;
     IOByteCount pcieCapOffset;
     IOByteCount pciPMCtrlOffset;
 
-    /* statistics data */
+    /* 统计数据 */
     UInt32 deadlockWarn;
     IONetworkStats *netStats;
     IOEthernetStats *etherStats;
@@ -415,6 +412,7 @@ private:
     IODMACommand *statDescDmaCmd;
     struct RtlStatData *statData;
 
+    /* 基础配置 */
     UInt32 mtu;
     UInt32 speed;
     UInt32 duplex;
@@ -423,6 +421,7 @@ private:
     UInt16 eeeCap;
     UInt16 eeeMode;
     struct pci_dev pciDeviceData;
+    /* 使用 RTL8126 专用私有结构 */
     struct rtl8126_private linuxData;
     struct IOEthernetAddress currMacAddr;
     struct IOEthernetAddress origMacAddr;
@@ -434,7 +433,7 @@ private:
     UInt32 intrMaskTimer;
     UInt32 intrMaskPoll;
 
-    /* flags */
+    /* 状态位 */
     UInt32 stateFlags;
     
     bool needsUpdate;

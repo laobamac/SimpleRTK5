@@ -1,24 +1,18 @@
 //
+//  SimpleRTK5Ethernet.cpp
 //  SimpleRTK5
 //
-//  Created by laobamac on 08.11.25.
-//  Copyright © 2025 laobamac. All rights reserved.
+//  Created by laobamac on 2025/10/7.
 //
 
-#include "SimpleRTK5ETH.hpp"
-
-#pragma mark --- function prototypes ---
+#include "SimpleRTK5Ethernet.hpp"
 
 static inline void prepareTSO4(mbuf_t m, UInt32 *tcpOffset, UInt32 *mss);
 static inline void prepareTSO6(mbuf_t m, UInt32 *tcpOffset, UInt32 *mss);
 
 static inline u32 ether_crc(int length, unsigned char *data);
 
-#pragma mark --- public methods ---
-
 OSDefineMetaClassAndStructors(SimpleRTK5, super)
-
-/* IOService (or its superclass) methods. */
 
 bool SimpleRTK5::init(OSDictionary *properties)
 {
@@ -51,7 +45,7 @@ bool SimpleRTK5::init(OSDictionary *properties)
         statPhyAddr = (IOPhysicalAddress64)NULL;
         statData = NULL;
 
-        /* Initialize state flags. */
+        /* 初始化状态标志 */
         stateFlags = 0;
         
         mtu = ETH_DATA_LEN;
@@ -65,7 +59,6 @@ bool SimpleRTK5::init(OSDictionary *properties)
         linuxData.configEEE = 0;
         linuxData.s0MagicPacket = 0;
         linuxData.hwoptimize = 0;
-        linuxData.DASH = 0;
         pciDeviceData.vendor = 0;
         pciDeviceData.device = 0;
         pciDeviceData.subsystem_vendor = 0;
@@ -157,11 +150,13 @@ bool SimpleRTK5::start(IOService *provider)
 
     getParams();
     
+    /* 初始化PCI配置空间 */
     if (!initPCIConfigSpace(pciDevice)) {
         goto error_cfg;
     }
 
-    if (!initRTL8125()) {
+    /* 初始化芯片硬件 */
+    if (!initRTL8126()) {
         IOLog("SimpleRTK5: Failed to initialize chip.\n");
         goto error_cfg;
     }
@@ -178,6 +173,7 @@ bool SimpleRTK5::start(IOService *provider)
     }
     commandGate->retain();
     
+    /* 分配发送、接收和统计资源 */
     if (!setupTxResources()) {
         IOLog("SimpleRTK5: Error allocating Tx resources.\n");
         goto error_dma1;
@@ -274,7 +270,6 @@ void SimpleRTK5::stop(IOService *provider)
     super::stop(provider);
 }
 
-/* Power Management Support */
 static IOPMPowerState powerStateArray[kPowerStateCount] =
 {
     {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
@@ -324,17 +319,15 @@ void SimpleRTK5::systemWillShutdown(IOOptionBits specifier)
     if ((kIOMessageSystemWillPowerOff | kIOMessageSystemWillRestart) & specifier) {
         disable(netif);
         
-        /* Restore the original MAC address. */
+        /* 恢复原始MAC地址 */
         rtl8126_rar_set(&linuxData, (UInt8 *)&origMacAddr.bytes);
     }
     
     DebugLog("SimpleRTK5: systemWillShutdown() <===\n");
 
-    /* Must call super shutdown or system will stall. */
     super::systemWillShutdown(specifier);
 }
 
-/* IONetworkController methods. */
 IOReturn SimpleRTK5::enable(IONetworkInterface *netif)
 {
     const IONetworkMedium *selectedMedium;
@@ -360,9 +353,9 @@ IOReturn SimpleRTK5::enable(IONetworkInterface *netif)
         selectedMedium = mediumTable[MEDIUM_INDEX_AUTO];
     }
     selectMedium(selectedMedium);
-    enableRTL8125();
+    enableRTL8126();
     
-    /* We have to enable the interrupt because we are using a msi interrupt. */
+    /* 启用MSI中断 */
     interruptSource->enable();
 
     txDescDoneCount = txDescDoneLast = 0;
@@ -411,10 +404,10 @@ IOReturn SimpleRTK5::disable(IONetworkInterface *netif)
     needsUpdate = false;
     txDescDoneCount = txDescDoneLast = 0;
 
-    /* Disable interrupt as we are using msi. */
+    /* 禁用中断 */
     interruptSource->disable();
 
-    disableRTL8125();
+    disableRTL8126();
     
     clearRxTxRings();
     
@@ -446,8 +439,6 @@ IOReturn SimpleRTK5::outputStart(IONetworkInterface *interface, IOOptionBits opt
     UInt32 index;
     UInt32 i;
     
-    //DebugLog("SimpleRTK5: outputStart() ===>\n");
-    
     if (!(test_mask((__ENABLED_M | __LINK_UP_M), &stateFlags)))  {
         DebugLog("SimpleRTK5: Interface down. Dropping packets.\n");
         goto done;
@@ -456,7 +447,7 @@ IOReturn SimpleRTK5::outputStart(IONetworkInterface *interface, IOOptionBits opt
         cmd = 0;
         opts2 = 0;
 
-        /* Get the packet length. */
+        /* 获取包长度 */
         len = (UInt32)mbuf_pkthdr_len(m);
 
         if (mbuf_get_tso_requested(m, &offloadFlags, &mss)) {
@@ -464,43 +455,29 @@ IOReturn SimpleRTK5::outputStart(IONetworkInterface *interface, IOOptionBits opt
             freePacket(m);
             continue;
         }
+        /* 处理TSO卸载 */
         if (offloadFlags & (MBUF_TSO_IPV4 | MBUF_TSO_IPV6)) {
             if (offloadFlags & MBUF_TSO_IPV4) {
                 if ((len - kMacHdrLen) > mtu) {
-                    /*
-                     * Fix the pseudo header checksum, get the
-                     * TCP header size and set paylen.
-                     */
                     prepareTSO4(m, &tcpOff, &mss);
-                    
                     cmd = (GiantSendv4 | (tcpOff << GTTCPHO_SHIFT));
                     opts2 = ((mss & MSSMask) << MSSShift_8125);
                 } else {
-                    /*
-                     * There is no need for a TSO4 operation as the packet
-                     * can be sent in one frame.
-                     */
                     offloadFlags = kChecksumTCP;
                     opts2 = (TxIPCS_C | TxTCPCS_C);
                 }
             } else {
                 if ((len - kMacHdrLen) > mtu) {
-                    /* The pseudoheader checksum has to be adjusted first. */
                     prepareTSO6(m, &tcpOff, &mss);
-                    
                     cmd = (GiantSendv6 | (tcpOff << GTTCPHO_SHIFT));
                     opts2 = ((mss & MSSMask) << MSSShift_8125);
                 } else {
-                    /*
-                     * There is no need for a TSO6 operation as the packet
-                     * can be sent in one frame.
-                     */
                     offloadFlags = kChecksumTCPIPv6;
                     opts2 = (TxTCPCS_C | TxIPV6F_C | (((kMacHdrLen + kIPv6HdrLen) & TCPHO_MAX) << TCPHO_SHIFT));
                 }
             }
         } else {
-            /* We use mss as a dummy here because it isn't needed anymore. */
+            /* 处理Checksum卸载 */
             mbuf_get_csum_requested(m, &offloadFlags, &mss);
             
             if (offloadFlags & kChecksumTCP)
@@ -514,14 +491,9 @@ IOReturn SimpleRTK5::outputStart(IONetworkInterface *interface, IOOptionBits opt
             else if (offloadFlags & kChecksumIP)
                 opts2 = TxIPCS_C;
         }
-        /* Finally get the physical segments. */
+        /* 获取物理段 */
         numSegs = txMbufCursor->getPhysicalSegmentsWithCoalesce(m, &txSegments[0], kMaxSegs);
 
-        /* Alloc required number of descriptors. As the descriptor
-         * which has been freed last must be considered to be still
-         * in use we never fill the ring completely but leave at
-         * least one unused.
-         */
         if (!numSegs) {
             DebugLog("SimpleRTK5: getPhysicalSegmentsWithCoalesce() failed. Dropping packet.\n");
             freePacket(m);
@@ -534,10 +506,10 @@ IOReturn SimpleRTK5::outputStart(IONetworkInterface *interface, IOOptionBits opt
         firstDesc = &txDescArray[index];
         lastSeg = numSegs - 1;
         
-        /* Next fill in the VLAN tag. */
+        /* 填充VLAN标签 */
         opts2 |= (getVlanTagDemand(m, &vlanTag)) ? (OSSwapInt16(vlanTag) | TxVlanTag) : 0;
         
-        /* And finally fill in the descriptors. */
+        /* 填充描述符 */
         for (i = 0; i < numSegs; i++) {
             desc = &txDescArray[index];
             opts1 = (((UInt32)txSegments[i].length) | cmd);
@@ -556,19 +528,16 @@ IOReturn SimpleRTK5::outputStart(IONetworkInterface *interface, IOOptionBits opt
             desc->opts2 = OSSwapHostToLittleInt32(opts2);
             desc->opts1 = OSSwapHostToLittleInt32(opts1);
             
-            //DebugLog("SimpleRTK5: opts1=0x%x, opts2=0x%x, addr=0x%llx, len=0x%llx\n", opts1, opts2, txSegments[i].location, txSegments[i].length);
             ++index &= kTxDescMask;
         }
         firstDesc->opts1 |= DescOwn;
     }
-    /* Update tail pointer. */
+    /* 更新尾部指针 */
     WriteReg16(SW_TAIL_PTR0_8125, txTailPtr0 & 0xffff);
 
     result = (txNumFreeDesc > (kMaxSegs + 3)) ? kIOReturnSuccess : kIOReturnNoResources;
     
 done:
-    //DebugLog("SimpleRTK5: outputStart() <===\n");
-    
     return result;
 }
 
@@ -585,18 +554,14 @@ void SimpleRTK5::getPacketBufferConstraints(IOPacketBufferConstraints *constrain
 IOOutputQueue* SimpleRTK5::createOutputQueue()
 {
     DebugLog("SimpleRTK5: createOutputQueue() ===>\n");
-    
     DebugLog("SimpleRTK5: createOutputQueue() <===\n");
-
     return IOBasicOutputQueue::withTarget(this);
 }
 
 const OSString* SimpleRTK5::newVendorString() const
 {
     DebugLog("SimpleRTK5: newVendorString() ===>\n");
-    
     DebugLog("SimpleRTK5: newVendorString() <===\n");
-
     return OSString::withCString("Realtek");
 }
 
@@ -604,7 +569,7 @@ const OSString* SimpleRTK5::newModelString() const
 {
     DebugLog("SimpleRTK5: newModelString() ===>\n");
     DebugLog("SimpleRTK5: newModelString() <===\n");
-    
+    /* 更新型号字符串以反映2.5G/5G支持 */
     return OSString::withCString(rtl_chip_info[linuxData.chipset].name);
 }
 
@@ -622,7 +587,7 @@ bool SimpleRTK5::configureInterface(IONetworkInterface *interface)
     if (!result)
         goto done;
     
-    /* Get the generic network statistics structure. */
+    /* 获取网络统计结构 */
     data = interface->getParameter(kIONetworkStatsKey);
     
     if (data) {
@@ -634,7 +599,7 @@ bool SimpleRTK5::configureInterface(IONetworkInterface *interface)
             goto done;
         }
     }
-    /* Get the Ethernet statistics structure. */
+    /* 获取以太网统计结构 */
     data = interface->getParameter(kIOEthernetStatsKey);
     
     if (data) {
@@ -660,7 +625,8 @@ bool SimpleRTK5::configureInterface(IONetworkInterface *interface)
         result = false;
         goto done;
     }
-    snprintf(modelName, kNameLenght, "Realtek %s PCIe 5 Gbit Ethernet", rtl_chip_info[linuxData.chipset].name);
+    /* 动态设置型号名称 */
+    snprintf(modelName, kNameLenght, "Realtek %s PCIe 2.5/5 Gbit Ethernet", rtl_chip_info[linuxData.chipset].name);
     setProperty("model", modelName);
     
     DebugLog("SimpleRTK5: configureInterface() <===\n");
@@ -672,24 +638,18 @@ done:
 bool SimpleRTK5::createWorkLoop()
 {
     DebugLog("SimpleRTK5: createWorkLoop() ===>\n");
-    
     workLoop = IOWorkLoop::workLoop();
-    
     DebugLog("SimpleRTK5: createWorkLoop() <===\n");
-
     return workLoop ? true : false;
 }
 
 IOWorkLoop* SimpleRTK5::getWorkLoop() const
 {
     DebugLog("SimpleRTK5: getWorkLoop() ===>\n");
-    
     DebugLog("SimpleRTK5: getWorkLoop() <===\n");
-
     return workLoop;
 }
 
-/* Methods inherited from IOEthernetController. */
 IOReturn SimpleRTK5::getHardwareAddress(IOEthernetAddress *addr)
 {
     IOReturn result = kIOReturnError;
@@ -862,10 +822,8 @@ IOReturn SimpleRTK5::getPacketFilters(const OSSymbol *group, UInt32 *filters) co
         DebugLog("SimpleRTK5: kIOEthernetWakeOnMagicPacket added to filters.\n");
     } else {
         result = super::getPacketFilters(group, filters);
-        DebugLog("SimpleRTK5: kIOEthernetWakeOnMagicPacket cannot add to filters.group -> %s, wol: %s\n",
-                 gIOEthernetWakeOnLANFilterGroup->getCStringNoCopy(),
-                 wolCapable ? "true" : "false");
     }
+    
     DebugLog("SimpleRTK5: getPacketFilters() <===\n");
 
     return result;
@@ -904,7 +862,6 @@ IOReturn SimpleRTK5::selectMedium(const IONetworkMedium *medium)
                 autoneg = AUTONEG_ENABLE;
                 speed = 0;
                 duplex = DUPLEX_FULL;
-                //linuxData.eee_adv_t = eeeCap;
                 break;
                 
             case MEDIUM_INDEX_10HD:
@@ -980,7 +937,8 @@ IOReturn SimpleRTK5::selectMedium(const IONetworkMedium *medium)
                 duplex = DUPLEX_FULL;
                 flowCtl = kFlowControlOn;
                 break;
-                
+
+            /* 增加5G速率支持 */
             case MEDIUM_INDEX_5000FD:
                 speed = SPEED_5000;
                 duplex = DUPLEX_FULL;
@@ -992,7 +950,7 @@ IOReturn SimpleRTK5::selectMedium(const IONetworkMedium *medium)
                 flowCtl = kFlowControlOn;
                 break;
         }
-        //setPhyMedium();
+
         setCurrentMedium(medium);
         setLinkDown();
     }
@@ -1003,28 +961,13 @@ done:
     return result;
 }
 
-#pragma mark --- jumbo frame support methods ---
-
 IOReturn SimpleRTK5::getMaxPacketSize(UInt32 * maxSize) const
 {
     DebugLog("SimpleRTK5: getMaxPacketSize() ===>\n");
         
     if (version_major >= 22) {
-        /*
-         * Starting with Ventura we can be honest about jumbo
-         * frame support.
-         */
         *maxSize = rxBufferSize - 2;
     } else {
-        /*
-         * In case we reported a maximum packet size below 9018
-         * the network preferences panel wouldn't allow the user
-         * to set an MTU above 1500 which would disable jumbo
-         * frame support completely. Therefore we fake a maximum
-         * packet size of 9018 although trying to set anything
-         * above 4094 in setMaxPacketSize() will fail. This is
-         * ugly but the only solution.
-         */
         *maxSize = kMaxPacketSize;
     }
     DebugLog("SimpleRTK5: maxSize: %u, version_major: %u\n", *maxSize, version_major);
@@ -1067,10 +1010,11 @@ IOReturn SimpleRTK5::setMaxPacketSize(UInt32 maxSize)
         }
         if (ifnet_set_offload(ifnet, offload))
             IOLog("SimpleRTK5: Error setting hardware offload: %x!\n", offload);
-        /* Force reinitialization. */
+        
+        /* 强制重新初始化 */
         setLinkDown();
         timerSource->cancelTimeout();
-        restartRTL8125();
+        restartRTL8126();
         
         result = kIOReturnSuccess;
     }
@@ -1079,8 +1023,6 @@ IOReturn SimpleRTK5::setMaxPacketSize(UInt32 maxSize)
     
     return result;
 }
-
-#pragma mark --- common interrupt methods ---
 
 void SimpleRTK5::pciErrorInterrupt()
 {
@@ -1094,8 +1036,8 @@ void SimpleRTK5::pciErrorInterrupt()
     pciDevice->configWrite16(kIOPCIConfigCommand, cmdReg);
     pciDevice->configWrite16(kIOPCIConfigStatus, statusReg);
     
-    /* Reset the NIC in order to resume operation. */
-    restartRTL8125();
+    /* 重置网卡以恢复操作 */
+    restartRTL8126();
 }
 
 void SimpleRTK5::txInterrupt()
@@ -1106,8 +1048,6 @@ void SimpleRTK5::txInterrupt()
     UInt32 numDone;
 
     numDone = ((nextClosePtr - txClosePtr0) & 0xffff);
-    
-    //DebugLog("SimpleRTK5: txInterrupt() txClosePtr0: %u, nextClosePtr: %u, numDone: %u.\n", txClosePtr0, nextClosePtr, numDone);
     
     txClosePtr0 = nextClosePtr;
 
@@ -1147,7 +1087,7 @@ UInt32 SimpleRTK5::rxInterrupt(IONetworkInterface *interface, uint32_t maxCount,
         opts2 = 0;
         addr = 0;
         
-        /* As we don't support fragmented packets we treat them as errors. */
+        /* 检查分片包错误 */
         if (unlikely((descStatus1 & (FirstFrag|LastFrag)) != (FirstFrag|LastFrag))) {
             DebugLog("SimpleRTK5: Fragmented packet.\n");
             etherStats->dot3StatsEntry.frameTooLongs++;
@@ -1155,7 +1095,7 @@ UInt32 SimpleRTK5::rxInterrupt(IONetworkInterface *interface, uint32_t maxCount,
             goto nextDesc;
         }
         
-        /* Drop packets with receive errors. */
+        /* 检查接收错误 */
         if (unlikely(descStatus1 & RxRES)) {
             DebugLog("SimpleRTK5: Rx error.\n");
             
@@ -1172,15 +1112,11 @@ UInt32 SimpleRTK5::rxInterrupt(IONetworkInterface *interface, uint32_t maxCount,
         descStatus2 = OSSwapLittleToHostInt32(desc->opts2);
         pktSize = (descStatus1 & 0x1fff) - kIOEthernetCRCSize;
         bufPkt = rxMbufArray[rxNextDescIndex];
-        //DebugLog("SimpleRTK5: rxInterrupt(): descStatus1=0x%x, descStatus2=0x%x, pktSize=%u\n", descStatus1, descStatus2, pktSize);
         
         newPkt = replaceOrCopyPacket(&bufPkt, pktSize, &replaced);
         
         if (unlikely(!newPkt)) {
-            /*
-             * Allocation of a new packet failed. Try to get
-             * a replacement from the list of spare packets.
-             */
+            /* 分配失败，尝试使用备用包 */
             if (spareNum > 1) {
                 DebugLog("SimpleRTK5: Use spare packet to replace buffer (%d available).\n", spareNum);
                 OSDecrementAtomic(&spareNum);
@@ -1193,17 +1129,14 @@ UInt32 SimpleRTK5::rxInterrupt(IONetworkInterface *interface, uint32_t maxCount,
                 mbuf_setnext(bufPkt, NULL);
                 goto handle_pkt;
             }
-            /*
-             * No spare packets available so that we must leave
-             * the original packet in place as a last resort.
-             */
+            /* 无备用包，丢弃当前包 */
             DebugLog("SimpleRTK5: replaceOrCopyPacket() failed.\n");
             etherStats->dot3RxExtraEntry.resourceErrors++;
             opts1 |= rxBufferSize;
             goto nextDesc;
         }
 handle_pkt:
-        /* If the packet was replaced we have to update the descriptor's buffer address. */
+        /* 如果包被替换，更新描述符缓冲地址 */
         if (replaced) {
             if (rxMbufCursor->getPhysicalSegments(bufPkt, &rxSegment, 1) != 1) {
                 DebugLog("SimpleRTK5: getPhysicalSegments() failed.\n");
@@ -1218,12 +1151,12 @@ handle_pkt:
         } else {
             opts1 |= rxBufferSize;
         }
-        /* Set the length of the buffer. */
+        /* 设置缓冲区长度 */
         mbuf_setlen(newPkt, pktSize);
 
         getChecksumResult(newPkt, descStatus1, descStatus2);
 
-        /* Also get the VLAN tag if there is any. */
+        /* 获取VLAN标签 */
         if (descStatus2 & RxVlanTag)
             setVlanTag(newPkt, OSSwapInt16(descStatus2 & 0xffff));
 
@@ -1231,7 +1164,6 @@ handle_pkt:
         interface->enqueueInputPacket(newPkt, pollQueue);
         goodPkts++;
         
-        /* Finally update the descriptor and get the next one to examine. */
     nextDesc:
         if (addr)
             desc->addr = OSSwapHostToLittleInt64(addr);
@@ -1255,15 +1187,16 @@ void SimpleRTK5::checkLinkStatus()
     currLinkState = ReadReg16(PHYstatus);
     
     if (currLinkState & LinkStatus) {
-        /* Get EEE mode. */
         eeeMode = getEEEMode();
         
-        /* Get link speed, duplex and flow-control mode. */
+        /* 获取链路速率、双工和流控模式 */
         if (currLinkState & (TxFlowCtrl | RxFlowCtrl)) {
             flowCtl = kFlowControlOn;
         } else {
             flowCtl = kFlowControlOff;
         }
+
+        /* 增加5G速率判断 */
         if (currLinkState & _5000bpsF) {
             speed = SPEED_5000;
             duplex = DUPLEX_FULL;
@@ -1290,8 +1223,8 @@ void SimpleRTK5::checkLinkStatus()
                 duplex = DUPLEX_HALF;
             }
         }
-        setupRTL8125();
-
+        setupRTL8126();
+        
         switch (tp->mcfg) {
         case CFG_METHOD_1:
         case CFG_METHOD_2:
@@ -1326,9 +1259,7 @@ void SimpleRTK5::interruptHandler(OSObject *client, IOInterruptEventSource *src,
     
     status = ReadReg32(ISR0_8125);
     
-    //DebugLog("SimpleRTK5: interruptHandler: status = 0x%x.\n", status);
-
-    /* hotplug/major error/no more work/shared irq */
+    /* 热插拔/重大错误/无工作/共享IRQ */
     if ((status == 0xFFFFFFFF) || !status)
         goto done;
     
@@ -1341,7 +1272,7 @@ void SimpleRTK5::interruptHandler(OSObject *client, IOInterruptEventSource *src,
     }
     if (!test_bit(__POLL_MODE, &stateFlags) &&
         !test_and_set_bit(__POLLING, &stateFlags)) {
-        /* Rx interrupt */
+        /* 接收中断 */
         if (status & (RxOK | RxDescUnavail)) {
             packets = rxInterrupt(netif, kNumRxDesc, NULL, NULL);
             
@@ -1353,7 +1284,7 @@ void SimpleRTK5::interruptHandler(OSObject *client, IOInterruptEventSource *src,
             if (spareNum < kRxNumSpareMbufs)
                 refillSpareBuffers();
         }
-        /* Tx interrupt */
+        /* 发送中断 */
         if (status & (TxOK | RxOK | PCSTimeout)) {
             txInterrupt();
             
@@ -1390,10 +1321,6 @@ bool SimpleRTK5::txHangCheck()
     
     if ((txDescDoneCount == txDescDoneLast) && (txNumFreeDesc < kNumTxDesc)) {
         if (++deadlockWarn == kTxCheckTreshhold) {
-            /* Some members of the RTL8125 family seem to be prone to lose transmitter rinterrupts.
-             * In order to avoid false positives when trying to detect transmitter deadlocks, check
-             * the transmitter ring once for completed descriptors before we assume a deadlock.
-             */
             DebugLog("SimpleRTK5: Warning: Tx timeout, ISR0=0x%x, IMR0=0x%x, polling=%u.\n", ReadReg32(ISR0_8125),
                      ReadReg32(IMR0_8125), test_bit(__POLL_MODE, &stateFlags));
             etherStats->dot3TxExtraEntry.timeouts++;
@@ -1411,7 +1338,7 @@ bool SimpleRTK5::txHangCheck()
             IOLog("SimpleRTK5: Tx stalled? Resetting chipset. ISR0=0x%x, IMR0=0x%x.\n", ReadReg32(ISR0_8125),
                   ReadReg32(IMR0_8125));
             etherStats->dot3TxExtraEntry.resets++;
-            restartRTL8125();
+            restartRTL8126();
             deadlock = true;
         }
     } else {
@@ -1420,12 +1347,8 @@ bool SimpleRTK5::txHangCheck()
     return deadlock;
 }
 
-#pragma mark --- rx poll methods ---
-
 IOReturn SimpleRTK5::setInputPacketPollingEnable(IONetworkInterface *interface, bool enabled)
 {
-    //DebugLog("SimpleRTK5: setInputPacketPollingEnable() ===>\n");
-
     if (test_bit(__ENABLED, &stateFlags)) {
         if (enabled) {
             set_bit(__POLL_MODE, &stateFlags);
@@ -1439,22 +1362,17 @@ IOReturn SimpleRTK5::setInputPacketPollingEnable(IONetworkInterface *interface, 
         WriteReg32(IMR0_8125, intrMask);
     }
     DebugLog("SimpleRTK5: Input polling %s.\n", enabled ? "enabled" : "disabled");
-
-    //DebugLog("SimpleRTK5: setInputPacketPollingEnable() <===\n");
     
     return kIOReturnSuccess;
 }
 
 void SimpleRTK5::pollInputPackets(IONetworkInterface *interface, uint32_t maxCount, IOMbufQueue *pollQueue, void *context )
 {
-    //DebugLog("SimpleRTK5: pollInputPackets() ===>\n");
-    
     if (test_bit(__POLL_MODE, &stateFlags) &&
         !test_and_set_bit(__POLLING, &stateFlags)) {
 
         rxInterrupt(interface, maxCount, pollQueue, context);
         
-        /* Finally cleanup the transmitter ring. */
         txInterrupt();
         
         clear_bit(__POLLING, &stateFlags);
@@ -1462,10 +1380,7 @@ void SimpleRTK5::pollInputPackets(IONetworkInterface *interface, uint32_t maxCou
         if (spareNum < kRxNumSpareMbufs)
             commandGate->runAction(refillAction);
     }
-    //DebugLog("SimpleRTK5: pollInputPackets() <===\n");
 }
-
-#pragma mark --- hardware specific methods ---
 
 inline void SimpleRTK5::getChecksumResult(mbuf_t m, UInt32 status1, UInt32 status2)
 {
@@ -1511,13 +1426,14 @@ void SimpleRTK5::setLinkUp()
     
     eeeName = eeeNames[kEEETypeNo];
 
-    /* Get link speed, duplex and flow-control mode. */
+    /* 获取链路速率、双工和流控模式 */
     if (flowCtl == kFlowControlOn) {
         flowName = onFlowName;
     } else {
         flowName = offFlowName;
     }
     
+    /* 增加5G处理逻辑 */
     if (speed == SPEED_5000) {
         mediumSpeed = kSpeed5000MBit;
         speedName = speed5GName;
@@ -1596,15 +1512,13 @@ void SimpleRTK5::setLinkUp()
             duplexName = duplexHalfName;
         }
     }
-    /* Enable receiver and transmitter. */
+    /* 启用接收和发送 */
     WriteReg8(ChipCmd, CmdTxEnb | CmdRxEnb);
 
     set_bit(__LINK_UP, &stateFlags);
     setLinkStatus(kIONetworkLinkValid | kIONetworkLinkActive, mediumTable[mediumIndex], mediumSpeed, NULL);
 
-    /* Start output thread, statistics update and watchdog. Also
-     * update poll params according to link speed.
-     */
+    /* 启动输出线程，统计更新和看门狗 */
     bzero(&pParams, sizeof(IONetworkPacketPollingParameters));
     
     if (speed == SPEED_10) {
@@ -1619,9 +1533,10 @@ void SimpleRTK5::setLinkUp()
         pParams.lowThresholdBytes = 0x1000;
         pParams.highThresholdBytes = 0x10000;
         
-        if (speed == SPEED_2500)
+        /* 5G和2.5G共用轮询参数 */
+        if (speed == SPEED_5000)
             pParams.pollIntervalTime = pollInterval2500;
-        else if (speed == SPEED_5000)
+        else if (speed == SPEED_2500)
             pParams.pollIntervalTime = pollInterval2500;
         else if (speed == SPEED_1000)
             pParams.pollIntervalTime = 170000;   /* 170µs */
@@ -1641,17 +1556,17 @@ void SimpleRTK5::setLinkDown()
     deadlockWarn = 0;
     needsUpdate = false;
 
-    /* Stop output thread and flush output queue. */
+    /* 停止输出线程并刷新队列 */
     netif->stopOutputThread();
     netif->flushOutputQueue();
 
-    /* Update link status. */
+    /* 更新链路状态 */
     clear_mask((__LINK_UP_M | __POLL_MODE_M), &stateFlags);
     setLinkStatus(kIONetworkLinkValid);
 
     rtl8126_nic_reset(&linuxData);
 
-    /* Cleanup descriptor ring. */
+    /* 清理描述符环 */
     clearRxTxRings();
     
     setPhyMedium();
@@ -1664,7 +1579,7 @@ void SimpleRTK5::updateStatitics()
     UInt32 sgColl, mlColl;
     UInt32 cmd;
 
-    /* Check if a statistics dump has been completed. */
+    /* 检查统计数据转储是否完成 */
     if (needsUpdate && !(ReadReg32(CounterAddrLow) & CounterDump)) {
         needsUpdate = false;
         netStats->inputPackets = OSSwapLittleToHostInt64(statData->rxPackets) & 0x00000000ffffffff;
@@ -1682,7 +1597,7 @@ void SimpleRTK5::updateStatitics()
         etherStats->dot3StatsEntry.missedFrames = OSSwapLittleToHostInt16(statData->rxMissed);
         etherStats->dot3TxExtraEntry.underruns = OSSwapLittleToHostInt16(statData->txUnderun);
     }
-    /* Some chips are unable to dump the tally counter while the receiver is disabled. */
+    
     if (test_bit(__LINK_UP, &stateFlags) && (ReadReg8(ChipCmd) & CmdRxEnb)) {
         WriteReg32(CounterAddrHigh, (statPhyAddr >> 32));
         cmd = (statPhyAddr & 0x00000000ffffffff);
@@ -1692,7 +1607,7 @@ void SimpleRTK5::updateStatitics()
     }
 }
 
-void SimpleRTK5::timerActionRTL8125(IOTimerEventSource *timer)
+void SimpleRTK5::timerActionRTL8126(IOTimerEventSource *timer)
 {
 #ifdef DEBUG
     UInt32 rxIntr = etherStats->dot3RxExtraEntry.interrupts - lastRxIntrupts;
@@ -1702,8 +1617,6 @@ void SimpleRTK5::timerActionRTL8125(IOTimerEventSource *timer)
     lastRxIntrupts = etherStats->dot3RxExtraEntry.interrupts;
     lastTxIntrupts = etherStats->dot3TxExtraEntry.interrupts;
     lastTmrIntrupts = tmrInterrupts;
-    
-    DebugLog("SimpleRTK5: rxIntr/s: %u, txIntr/s: %u, timerIntr/s: %u\n", rxIntr, txIntr, tmrIntr);
 #endif
     
     updateStatitics();
@@ -1711,7 +1624,7 @@ void SimpleRTK5::timerActionRTL8125(IOTimerEventSource *timer)
     if (!test_bit(__LINK_UP, &stateFlags))
         goto done;
 
-    /* Check for tx deadlock. */
+    /* 检查发送死锁 */
     if (txHangCheck())
         goto done;
     
@@ -1719,10 +1632,7 @@ void SimpleRTK5::timerActionRTL8125(IOTimerEventSource *timer)
         
 done:
     txDescDoneLast = txDescDoneCount;
-    
 }
-
-#pragma mark --- miscellaneous functions ---
 
 static inline void prepareTSO4(mbuf_t m, UInt32 *tcpOffset, UInt32 *mss)
 {
@@ -1730,7 +1640,6 @@ static inline void prepareTSO4(mbuf_t m, UInt32 *tcpOffset, UInt32 *mss)
     struct ip4_hdr_be *ip = (struct ip4_hdr_be *)p;
     struct tcp_hdr_be *tcp;
     UInt32 csum32 = 6;
-    //UInt32 max;
     UInt32 i, il, tl;
     
     for (i = 0; i < 4; i++) {
@@ -1742,9 +1651,8 @@ static inline void prepareTSO4(mbuf_t m, UInt32 *tcpOffset, UInt32 *mss)
     
     tcp = (struct tcp_hdr_be *)(p + il);
     tl = ((tcp->dat_off & 0xf0) >> 2);
-    //max = ETH_DATA_LEN - (il + tl);
 
-    /* Fill in the pseudo header checksum for TSOv4. */
+    /* 填充TSOv4的伪首部校验和 */
     tcp->csum = htons((UInt16)csum32);
 
     *tcpOffset = kMacHdrLen + il;
@@ -1760,7 +1668,6 @@ static inline void prepareTSO6(mbuf_t m, UInt32 *tcpOffset, UInt32 *mss)
     struct tcp_hdr_be *tcp;
     UInt32 csum32 = 6;
     UInt32 i, tl;
-    //UInt32 max;
 
     ip6->pay_len = 0;
 
@@ -1769,12 +1676,11 @@ static inline void prepareTSO6(mbuf_t m, UInt32 *tcpOffset, UInt32 *mss)
         csum32 += (csum32 >> 16);
         csum32 &= 0xffff;
     }
-    /* Get the length of the TCP header. */
+    
     tcp = (struct tcp_hdr_be *)(p + kIPv6HdrLen);
     tl = ((tcp->dat_off & 0xf0) >> 2);
-    //max = ETH_DATA_LEN - (kIPv6HdrLen + tl);
 
-    /* Fill in the pseudo header checksum for TSOv6. */
+    /* 填充TSOv6的伪首部校验和 */
     tcp->csum = htons((UInt16)csum32);
 
     *tcpOffset = kMacHdrLen + kIPv6HdrLen;

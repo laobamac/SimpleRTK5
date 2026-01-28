@@ -1,18 +1,17 @@
 //
+//  r8126_dash.h
 //  SimpleRTK5
 //
-//  Created by laobamac on 08.11.25.
-//  Copyright © 2025 laobamac. All rights reserved.
+//  Created by laobamac on 2025/10/5.
 //
 
-/* SPDX-License-Identifier: GPL-2.0-only */
 /*
 ################################################################################
 #
-# r8126 is the Linux device driver released for Realtek 5 Gigabit Ethernet
+# r8126 is the Linux device driver released for Realtek 2.5Gigabit Ethernet
 # controllers with PCI-Express interface.
 #
-# Copyright(c) 2024 Realtek Semiconductor Corp. All rights reserved.
+# Copyright(c) 2020 Realtek Semiconductor Corp. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the Free
@@ -39,8 +38,8 @@
  *  US6,570,884, US6,115,776, and US6,327,625.
  ***********************************************************************************/
 
-#ifndef _LINUX_R8126_DASH_H
-#define _LINUX_R8126_DASH_H
+#ifndef _LINUX_R8125_DASH_H
+#define _LINUX_R8125_DASH_H
 
 #define SIOCDEVPRIVATE_RTLDASH   SIOCDEVPRIVATE+2
 
@@ -77,48 +76,48 @@ struct rtl_dash_ip_mac {
 };
 
 struct rtl_dash_ioctl_struct {
-        __u32    cmd;
-        __u32    offset;
-        __u32    len;
+        __u32	cmd;
+        __u32	offset;
+        __u32	len;
         union {
-                __u32    data;
+                __u32	data;
                 void *data_buffer;
         };
 };
 
 struct settings_ipv4 {
-        __u32    IPv4addr;
-        __u32    IPv4mask;
-        __u32    IPv4Gateway;
+        __u32	IPv4addr;
+        __u32	IPv4mask;
+        __u32	IPv4Gateway;
 };
 
 struct settings_ipv6 {
-        __u32    reserved;
-        __u32    prefixLen;
-        __u16    IPv6addr[8];
-        __u16    IPv6Gateway[8];
+        __u32	reserved;
+        __u32	prefixLen;
+        __u16	IPv6addr[8];
+        __u16	IPv6Gateway[8];
 };
 
 struct settings_ext_snmp {
-        __u16    index;
-        __u16    oid_get_len;
-        __u8    oid_for_get[24];
-        __u8    reserved0[26];
-        __u16    value_len;
-        __u8    value[256];
-        __u8    supported;
-        __u8    reserved1[27];
+        __u16	index;
+        __u16	oid_get_len;
+        __u8	oid_for_get[24];
+        __u8	reserved0[26];
+        __u16	value_len;
+        __u8	value[256];
+        __u8	supported;
+        __u8	reserved1[27];
 };
 
 struct wakeup_pattern {
-        __u8    index;
-        __u8    valid;
-        __u8    start;
-        __u8    length;
-        __u8    name[36];
-        __u8    mask[16];
-        __u8    pattern[128];
-        __u32    reserved[2];
+        __u8	index;
+        __u8	valid;
+        __u8	start;
+        __u8	length;
+        __u8	name[36];
+        __u8	mask[16];
+        __u8	pattern[128];
+        __u32	reserved[2];
 };
 
 typedef struct _RX_DASH_FROM_FW_DESC {
@@ -256,11 +255,11 @@ RX_DASH_BUFFER_TYPE_2, *PRX_DASH_BUFFER_TYPE_2;
 #define RTL_CMAC_R16(tp, reg)        readw (tp->cmac_ioaddr + (reg))
 #define RTL_CMAC_R32(tp, reg)        ((unsigned long) readl (tp->cmac_ioaddr + (reg)))
 
-int rtl8126_dash_ioctl(struct net_device *dev, struct ifreq *ifr);
+int rtl8125_dash_ioctl(struct net_device *dev, struct ifreq *ifr);
 void HandleDashInterrupt(struct net_device *dev);
 int AllocateDashShareMemory(struct net_device *dev);
 void FreeAllocatedDashShareMemory(struct net_device *dev);
 void DashHwInit(struct net_device *dev);
 
 
-#endif /* _LINUX_R8126_DASH_H */
+#endif /* _LINUX_R8125_DASH_H */

@@ -101,7 +101,7 @@ do{                                                                            \
         tracer->recordToken(__LINE__,                                          \
             MAKEGTRACETAG(t0),static_cast<uint64_t>(__gtrace_log_sync_ind__),  \
             0, 0, 0, 0, 0, 0);                                                 \
-        IOLog("SimpleRTK5: GTrace synchronization point %x\n", __gtrace_log_sync_ind__);   \
+        IOLog("GTrace synchronization point %x\n", __gtrace_log_sync_ind__);   \
     }                                                                          \
 }while(0)
 #endif

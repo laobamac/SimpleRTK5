@@ -3,14 +3,14 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 63;
+	objectVersion = 54;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		D346B75A2443D45400905CD6 /* SimpleRTK5HW.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D346B7592443D45400905CD6 /* SimpleRTK5HW.cpp */; };
-		D38D865F2443ACB600D94935 /* SimpleRTK5ETH.hpp in Headers */ = {isa = PBXBuildFile; fileRef = D38D865E2443ACB600D94935 /* SimpleRTK5ETH.hpp */; };
-		D38D86612443ACB600D94935 /* SimpleRTK5ETH.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D38D86602443ACB600D94935 /* SimpleRTK5ETH.cpp */; };
-		D38F5FA12BABCA34005D5D2A /* SimpleRTK5STP.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D38F5FA02BABCA34005D5D2A /* SimpleRTK5STP.cpp */; };
+		D346B75A2443D45400905CD6 /* SimpleRTK5Hardware.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D346B7592443D45400905CD6 /* SimpleRTK5Hardware.cpp */; };
+		D38D865F2443ACB600D94935 /* SimpleRTK5Ethernet.hpp in Headers */ = {isa = PBXBuildFile; fileRef = D38D865E2443ACB600D94935 /* SimpleRTK5Ethernet.hpp */; };
+		D38D86612443ACB600D94935 /* SimpleRTK5Ethernet.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D38D86602443ACB600D94935 /* SimpleRTK5Ethernet.cpp */; };
+		D38F5FA12BABCA34005D5D2A /* SimpleRTK5Setup.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D38F5FA02BABCA34005D5D2A /* SimpleRTK5Setup.cpp */; };
 		D38F64F52BABD037005D5D2A /* libkmod.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D38F64F02BABD022005D5D2A /* libkmod.a */; };
 		D3E7391B2620E7CF0083B9FC /* SimpleRTK5Linux.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D3EF667D261531670078DB54 /* SimpleRTK5Linux.cpp */; };
 		D3EF6680261531670078DB54 /* SimpleRTK5Linux.hpp in Headers */ = {isa = PBXBuildFile; fileRef = D3EF667E261531670078DB54 /* SimpleRTK5Linux.hpp */; };
@@ -42,17 +42,17 @@
 
 /* Begin PBXFileReference section */
 		D346B7582443CE0A00905CD6 /* r8126_dash.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = r8126_dash.h; sourceTree = "<group>"; };
-		D346B7592443D45400905CD6 /* SimpleRTK5HW.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = SimpleRTK5HW.cpp; sourceTree = "<group>"; };
+		D346B7592443D45400905CD6 /* SimpleRTK5Hardware.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = SimpleRTK5Hardware.cpp; sourceTree = "<group>"; };
 		D38D865B2443ACB600D94935 /* SimpleRTK5.kext */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SimpleRTK5.kext; sourceTree = BUILT_PRODUCTS_DIR; };
-		D38D865E2443ACB600D94935 /* SimpleRTK5ETH.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = SimpleRTK5ETH.hpp; sourceTree = "<group>"; };
-		D38D86602443ACB600D94935 /* SimpleRTK5ETH.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = SimpleRTK5ETH.cpp; sourceTree = "<group>"; };
+		D38D865E2443ACB600D94935 /* SimpleRTK5Ethernet.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = SimpleRTK5Ethernet.hpp; sourceTree = "<group>"; };
+		D38D86602443ACB600D94935 /* SimpleRTK5Ethernet.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = SimpleRTK5Ethernet.cpp; sourceTree = "<group>"; };
 		D38D86622443ACB600D94935 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		D38D86682443AF9100D94935 /* SimpleRTK5-Prefix.pch */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "SimpleRTK5-Prefix.pch"; sourceTree = "<group>"; };
 		D38D86702443B66200D94935 /* ethertool.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ethertool.h; sourceTree = "<group>"; };
 		D38D86712443B66300D94935 /* linux.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = linux.h; sourceTree = "<group>"; };
 		D38D86722443B66300D94935 /* mii.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = mii.h; sourceTree = "<group>"; };
 		D38D86752443B66300D94935 /* if_ether.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = if_ether.h; sourceTree = "<group>"; };
-		D38F5FA02BABCA34005D5D2A /* SimpleRTK5STP.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = SimpleRTK5STP.cpp; sourceTree = "<group>"; };
+		D38F5FA02BABCA34005D5D2A /* SimpleRTK5Setup.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = SimpleRTK5Setup.cpp; sourceTree = "<group>"; };
 		D38F5FA72BABD01F005D5D2A /* libkmod.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libkmod.a; sourceTree = "<group>"; };
 		D38F5FA82BABD01F005D5D2A /* libkmodc++.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = "libkmodc++.a"; sourceTree = "<group>"; };
 		D38F5FAB2BABD01F005D5D2A /* libkmodtest.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = libkmodtest.h; sourceTree = "<group>"; };
@@ -66,6 +66,9 @@
 		D38F5FB52BABD01F005D5D2A /* i386_builtins.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = i386_builtins.c; sourceTree = "<group>"; };
 		D38F5FB62BABD01F005D5D2A /* c_stop.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = c_stop.c; sourceTree = "<group>"; };
 		D38F5FB82BABD01F005D5D2A /* libkmod.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libkmod.a; sourceTree = "<group>"; };
+		D38F5FBA2BABD01F005D5D2A /* xcode-link.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "xcode-link.png"; sourceTree = "<group>"; };
+		D38F5FBB2BABD01F005D5D2A /* xcode-config.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "xcode-config.png"; sourceTree = "<group>"; };
+		D38F5FBC2BABD01F005D5D2A /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		D38F5FBD2BABD01F005D5D2A /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
 		D38F5FBF2BABD01F005D5D2A /* AvailabilityMacros.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AvailabilityMacros.h; sourceTree = "<group>"; };
 		D38F5FC12BABD01F005D5D2A /* vfs_support.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = vfs_support.h; sourceTree = "<group>"; };
@@ -1281,6 +1284,7 @@
 		D38F64E72BABD022005D5D2A /* serial_protos.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = serial_protos.h; sourceTree = "<group>"; };
 		D38F64E82BABD022005D5D2A /* video_console.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = video_console.h; sourceTree = "<group>"; };
 		D38F64E92BABD022005D5D2A /* string.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = string.h; sourceTree = "<group>"; };
+		D38F64EA2BABD022005D5D2A /* LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE.txt; sourceTree = "<group>"; };
 		D3EF667D261531670078DB54 /* SimpleRTK5Linux.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = SimpleRTK5Linux.cpp; sourceTree = "<group>"; };
 		D3EF667E261531670078DB54 /* SimpleRTK5Linux.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = SimpleRTK5Linux.hpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -1317,10 +1321,10 @@
 		D38D865D2443ACB600D94935 /* SimpleRTK5 */ = {
 			isa = PBXGroup;
 			children = (
-				D38D865E2443ACB600D94935 /* SimpleRTK5ETH.hpp */,
-				D38D86602443ACB600D94935 /* SimpleRTK5ETH.cpp */,
-				D346B7592443D45400905CD6 /* SimpleRTK5HW.cpp */,
-				D38F5FA02BABCA34005D5D2A /* SimpleRTK5STP.cpp */,
+				D38D865E2443ACB600D94935 /* SimpleRTK5Ethernet.hpp */,
+				D38D86602443ACB600D94935 /* SimpleRTK5Ethernet.cpp */,
+				D346B7592443D45400905CD6 /* SimpleRTK5Hardware.cpp */,
+				D38F5FA02BABCA34005D5D2A /* SimpleRTK5Setup.cpp */,
 				D3EF667E261531670078DB54 /* SimpleRTK5Linux.hpp */,
 				D3EF667D261531670078DB54 /* SimpleRTK5Linux.cpp */,
 				D346B7582443CE0A00905CD6 /* r8126_dash.h */,
@@ -1346,8 +1350,11 @@
 			isa = PBXGroup;
 			children = (
 				D38F5FA52BABD01F005D5D2A /* Library */,
+				D38F5FB92BABD01F005D5D2A /* Docs */,
+				D38F5FBC2BABD01F005D5D2A /* README.md */,
 				D38F5FBD2BABD01F005D5D2A /* .gitignore */,
 				D38F5FBE2BABD01F005D5D2A /* Headers */,
+				D38F64EA2BABD022005D5D2A /* LICENSE.txt */,
 			);
 			path = MacKernelSDK;
 			sourceTree = "<group>";
@@ -1412,6 +1419,15 @@
 				D38F5FB82BABD01F005D5D2A /* libkmod.a */,
 			);
 			path = x86_64;
+			sourceTree = "<group>";
+		};
+		D38F5FB92BABD01F005D5D2A /* Docs */ = {
+			isa = PBXGroup;
+			children = (
+				D38F5FBA2BABD01F005D5D2A /* xcode-link.png */,
+				D38F5FBB2BABD01F005D5D2A /* xcode-config.png */,
+			);
+			path = Docs;
 			sourceTree = "<group>";
 		};
 		D38F5FBE2BABD01F005D5D2A /* Headers */ = {
@@ -3515,7 +3531,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D3EF6680261531670078DB54 /* SimpleRTK5Linux.hpp in Headers */,
-				D38D865F2443ACB600D94935 /* SimpleRTK5ETH.hpp in Headers */,
+				D38D865F2443ACB600D94935 /* SimpleRTK5Ethernet.hpp in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3536,7 +3552,7 @@
 			dependencies = (
 			);
 			name = SimpleRTK5;
-			productName = LucyRTL8125Ethernet;
+			productName = SimpleRTK5Ethernet;
 			productReference = D38D865B2443ACB600D94935 /* SimpleRTK5.kext */;
 			productType = "com.apple.product-type.kernel-extension";
 		};
@@ -3548,7 +3564,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1520;
-				ORGANIZATIONNAME = laobamac;
+				ORGANIZATIONNAME = "Laura Müller";
 				TargetAttributes = {
 					D38D865A2443ACB600D94935 = {
 						CreatedOnToolsVersion = 11.4;
@@ -3556,7 +3572,7 @@
 				};
 			};
 			buildConfigurationList = D38D86552443ACB600D94935 /* Build configuration list for PBXProject "SimpleRTK5" */;
-			compatibilityVersion = "Xcode 15.3";
+			compatibilityVersion = "Xcode 12.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -3618,9 +3634,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D38D86612443ACB600D94935 /* SimpleRTK5ETH.cpp in Sources */,
-				D38F5FA12BABCA34005D5D2A /* SimpleRTK5STP.cpp in Sources */,
-				D346B75A2443D45400905CD6 /* SimpleRTK5HW.cpp in Sources */,
+				D38D86612443ACB600D94935 /* SimpleRTK5Ethernet.cpp in Sources */,
+				D38F5FA12BABCA34005D5D2A /* SimpleRTK5Setup.cpp in Sources */,
+				D346B75A2443D45400905CD6 /* SimpleRTK5Hardware.cpp in Sources */,
 				D3E7391B2620E7CF0083B9FC /* SimpleRTK5Linux.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -3775,7 +3791,8 @@
 				DEVELOPMENT_TEAM = "";
 				GCC_PREFIX_HEADER = "SimpleRTK5/SimpleRTK5-Prefix.pch";
 				INFOPLIST_FILE = SimpleRTK5/Info.plist;
-				MACOSX_DEPLOYMENT_TARGET = 11.5;
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MARKETING_VERSION = 1.0.0;
 				MODULE_NAME = cn.laobamac.SimpleRTK5;
 				MODULE_VERSION = $CURRENT_PROJECT_VERSION;
 				PRODUCT_BUNDLE_IDENTIFIER = cn.laobamac.SimpleRTK5;
@@ -3801,7 +3818,8 @@
 				DEVELOPMENT_TEAM = "";
 				GCC_PREFIX_HEADER = "SimpleRTK5/SimpleRTK5-Prefix.pch";
 				INFOPLIST_FILE = SimpleRTK5/Info.plist;
-				MACOSX_DEPLOYMENT_TARGET = 11.5;
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MARKETING_VERSION = 1.0.0;
 				MODULE_NAME = cn.laobamac.SimpleRTK5;
 				MODULE_VERSION = $CURRENT_PROJECT_VERSION;
 				ONLY_ACTIVE_ARCH = YES;

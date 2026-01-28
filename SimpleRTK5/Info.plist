@@ -7,7 +7,7 @@
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<string>cn.laobamac.SimpleRTK5</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -19,7 +19,7 @@
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>IOKitPersonalities</key>
 	<dict>
 		<key>SimpleRTK5</key>
@@ -31,13 +31,13 @@
 				<key>disableASPM</key>
 				<true/>
 				<key>enableCSO6</key>
-				<false/>
+				<true/>
 				<key>enableEEE</key>
-				<false/>
+				<true/>
 				<key>enableTSO4</key>
-				<false/>
+				<true/>
 				<key>enableTSO6</key>
-				<false/>
+				<true/>
 				<key>fallbackMAC</key>
 				<string></string>
 				<key>µsPollInt2500</key>
@@ -50,7 +50,7 @@
 			<key>IOPCIMatch</key>
 			<string>0x812610ec 0x500010ec</string>
 			<key>IOProbeScore</key>
-			<integer>1000</integer>
+			<integer>2000</integer>
 			<key>IOProviderClass</key>
 			<string>IOPCIDevice</string>
 			<key>Model</key>
@@ -60,7 +60,7 @@
 		</dict>
 	</dict>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright © 2025 王孝慈. All rights reserved.</string>
+	<string>Copyright © 2025 王孝慈 All rights reserved.</string>
 	<key>OSBundleLibraries</key>
 	<dict>
 		<key>com.apple.iokit.IONetworkingFamily</key>

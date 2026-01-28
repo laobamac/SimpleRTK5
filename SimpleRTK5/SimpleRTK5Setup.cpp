@@ -1,11 +1,11 @@
 //
+//  SimpleRTK5Setup.cpp
 //  SimpleRTK5
 //
-//  Created by laobamac on 08.11.25.
-//  Copyright © 2025 laobamac. All rights reserved.
+//  Created by laobamac on 2025/10/6.
 //
 
-#include "SimpleRTK5ETH.hpp"
+#include "SimpleRTK5Ethernet.hpp"
 
 static const char *onName = "enabled";
 static const char *offName = "disabled";
@@ -95,9 +95,9 @@ void SimpleRTK5::getParams()
         pollInterval2500 = 0;
     }
     if (versionString)
-        IOLog("SimpleRTK5: SimpleRTK5ETH version %s starting.\n", versionString->getCStringNoCopy());
+        IOLog("SimpleRTK5: SimpleRTK5Ethernet version %s starting. Please don't support tonymacx86.com!\n", versionString->getCStringNoCopy());
     else
-        IOLog("SimpleRTK5: SimpleRTK5ETH starting.\n");
+        IOLog("SimpleRTK5: SimpleRTK5Ethernet starting. Please don't support tonymacx86.com!\n");
 }
 
 static IOMediumType mediumTypeArray[MEDIUM_INDEX_COUNT] = {
@@ -214,7 +214,7 @@ bool SimpleRTK5::initEventSources(IOService *provider)
     }
     workLoop->addEventSource(interruptSource);
     
-    timerSource = IOTimerEventSource::timerEventSource(this, OSMemberFunctionCast(IOTimerEventSource::Action, this, &SimpleRTK5::timerActionRTL8125));
+    timerSource = IOTimerEventSource::timerEventSource(this, OSMemberFunctionCast(IOTimerEventSource::Action, this, &SimpleRTK5::timerActionRTL8126));
     
     if (!timerSource) {
         IOLog("SimpleRTK5: Failed to create IOTimerEventSource.\n");
@@ -326,11 +326,7 @@ bool SimpleRTK5::setupRxResources()
         rxDescArray[i].opts2 = 0;
         rxDescArray[i].addr = OSSwapHostToLittleInt64(rxSegment.location);
     }
-    /*
-     * Allocate some spare mbufs and keep them in a buffer pool, to
-     * have them at hand in case replaceOrCopyPacket() fails
-     * under heavy load.
-     */
+    
     sparePktHead = sparePktTail = NULL;
 
     for (i = 0; i < kRxNumSpareMbufs; i++) {
