@@ -41,7 +41,6 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		D346B7582443CE0A00905CD6 /* r8126_dash.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = r8126_dash.h; sourceTree = "<group>"; };
 		D346B7592443D45400905CD6 /* SimpleRTK5Hardware.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = SimpleRTK5Hardware.cpp; sourceTree = "<group>"; };
 		D38D865B2443ACB600D94935 /* SimpleRTK5.kext */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SimpleRTK5.kext; sourceTree = BUILT_PRODUCTS_DIR; };
 		D38D865E2443ACB600D94935 /* SimpleRTK5Ethernet.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = SimpleRTK5Ethernet.hpp; sourceTree = "<group>"; };
@@ -1327,7 +1326,6 @@
 				D38F5FA02BABCA34005D5D2A /* SimpleRTK5Setup.cpp */,
 				D3EF667E261531670078DB54 /* SimpleRTK5Linux.hpp */,
 				D3EF667D261531670078DB54 /* SimpleRTK5Linux.cpp */,
-				D346B7582443CE0A00905CD6 /* r8126_dash.h */,
 				D38D86702443B66200D94935 /* ethertool.h */,
 				D38D86752443B66300D94935 /* if_ether.h */,
 				D38D86712443B66300D94935 /* linux.h */,

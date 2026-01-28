@@ -48,7 +48,6 @@
 #include "linux.h"
 #include "mii.h"
 #include "ethertool.h"
-#include "r8126_dash.h"
 
 #if DISABLED_CODE
 
@@ -2570,7 +2569,6 @@ struct rtl8126_private {
 #endif
     
         unsigned long state;
-        u32 flags;
 
 #if DISABLED_CODE
     

@@ -4224,12 +4224,9 @@ rtl8126_xmii_reset_pending(struct net_device *dev)
 {
         struct rtl8126_private *tp = netdev_priv(dev);
         unsigned int retval;
-        unsigned long flags;
 
-        r8126_spin_lock(&tp->phy_lock, flags);
         rtl8126_mdio_write(tp, 0x1f, 0x0000);
         retval = rtl8126_mdio_read(tp, MII_BMCR) & BMCR_RESET;
-        r8126_spin_unlock(&tp->phy_lock, flags);
 
         return retval;
 }
@@ -4289,13 +4286,10 @@ void
 rtl8126_xmii_reset_enable(struct net_device *dev)
 {
         struct rtl8126_private *tp = netdev_priv(dev);
-        unsigned long flags;
-        int ret;
+        int i, val = 0;
 
         if (rtl8126_is_in_phy_disable_mode(dev))
                 return;
-
-        r8126_spin_lock(&tp->phy_lock, flags);
 
         rtl8126_mdio_write(tp, 0x1f, 0x0000);
         rtl8126_mdio_write(tp, MII_ADVERTISE, rtl8126_mdio_read(tp, MII_ADVERTISE) &
@@ -4307,11 +4301,17 @@ rtl8126_xmii_reset_enable(struct net_device *dev)
                                           ~(RTK_ADVERTISE_2500FULL | RTK_ADVERTISE_5000FULL));
         rtl8126_mdio_write(tp, MII_BMCR, BMCR_RESET | BMCR_ANENABLE);
 
-        ret = rtl8126_wait_phy_reset_complete(tp);
+        for (i = 0; i < 2500; i++) {
+                val = rtl8126_mdio_read(tp, MII_BMCR) & BMCR_RESET;
+        
+                if (!val) {
+                return;
+                }
+                
+                mdelay(1);
+       }
 
-        r8126_spin_unlock(&tp->phy_lock, flags);
-
-        if (ret != 0 && netif_msg_link(tp))
+        if (netif_msg_link(tp))
                 printk(KERN_ERR "%s: PHY reset failed.\n", dev->name);
 }
 
