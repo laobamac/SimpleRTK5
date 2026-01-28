@@ -7,7 +7,7 @@
 [![Chipset](https://img.shields.io/badge/Chipset-RTL8126-005696?style=for-the-badge&logo=realtek&logoColor=white)](https://www.realtek.com)
 [![Speed](https://img.shields.io/badge/Speed-5GbE-76B900?style=for-the-badge&logo=speedtest&logoColor=white)]()
 [![Language](https://img.shields.io/badge/Language-C++%20%7C%20Objective--C-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)]()
-[![License](https://img.shields.io/badge/License-GPL_v2-red?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/License-GPL_v3-red?style=for-the-badge)](LICENSE)
 [![Build Status](https://img.shields.io/badge/Build-Passing-success?style=for-the-badge)]()
 
 <p align="center">
