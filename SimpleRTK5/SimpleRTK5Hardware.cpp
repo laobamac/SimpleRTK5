@@ -5,6 +5,26 @@
 //  Created by laobamac on 2025/10/6.
 //
 
+/* LucyRTL8125Hardware.cpp -- RTL8125 hardware initialzation methods.
+*
+* Copyright (c) 2020 Laura Müller <laura-mueller@uni-duesseldorf.de>
+* All rights reserved.
+*
+* This program is free software; you can redistribute it and/or modify it
+* under the terms of the GNU General Public License as published by the Free
+* Software Foundation; either version 2 of the License, or (at your option)
+* any later version.
+*
+* This program is distributed in the hope that it will be useful, but WITHOUT
+* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+* FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+* more details.
+*
+* Driver for Realtek RTL8125 PCIe 2.5GB ethernet controllers.
+*
+* This driver is based on Realtek's r8125 Linux driver (9.003.04).
+*/
+
 #include "SimpleRTK5Ethernet.hpp"
 
 #pragma mark--- 硬件初始化方法 ---
