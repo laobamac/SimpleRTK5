@@ -5,6 +5,14 @@
 //  Created by laobamac on 2025/10/7.
 //
 
+//
+//  LucyRTL8125Ethernet-Prefix.pch
+//  LucyRTL8125Ethernet
+//
+//  Created by Laura Müller on 12.04.20.
+//  Copyright © 2020 Laura Müller. All rights reserved.
+//
+
 #ifndef SimpleRTK5_Prefix_pch
 #define SimpleRTK5_Prefix_pch
 

@@ -5,6 +5,26 @@
 //  Created by laobamac on 2025/10/6.
 //
 
+/* LucyRTL8125Hardware.cpp -- RTL8125 hardware initialzation methods.
+*
+* Copyright (c) 2020 Laura Müller <laura-mueller@uni-duesseldorf.de>
+* All rights reserved.
+*
+* This program is free software; you can redistribute it and/or modify it
+* under the terms of the GNU General Public License as published by the Free
+* Software Foundation; either version 2 of the License, or (at your option)
+* any later version.
+*
+* This program is distributed in the hope that it will be useful, but WITHOUT
+* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+* FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+* more details.
+*
+* Driver for Realtek RTL8125 PCIe 2.5GB ethernet controllers.
+*
+* This driver is based on Realtek's r8125 Linux driver (9.003.04).
+*/
+
 #include "SimpleRTK5Ethernet.hpp"
 
 #pragma mark--- 硬件初始化方法 ---
@@ -33,19 +53,19 @@ bool SimpleRTK5::initPCIConfigSpace(IOPCIDevice *provider)
     if (provider->extendedFindPCICapability(kIOPCIPowerManagementCapability, &pmCapOffset))
     {
         pmCap = provider->extendedConfigRead16(pmCapOffset + kIOPCIPMCapability);
-        DebugLog("SimpleRTK5: PCI 电源管理能力: 0x%x.\n", pmCap);
+        DebugLog("SimpleRTK5: PCI Power Management: 0x%x.\n", pmCap);
 
         // 检查是否支持从 D3Cold 状态唤醒
         if (pmCap & kPCIPMCPMESupportFromD3Cold)
         {
             wolCapable = true;
-            DebugLog("SimpleRTK5: 支持从 D3 (cold) 唤醒 (PME#).\n");
+            DebugLog("SimpleRTK5: Support D3 (cold) wake (PME#).\n");
         }
         pciPMCtrlOffset = pmCapOffset + kIOPCIPMControl;
     }
     else
     {
-        IOLog("SimpleRTK5: 不支持 PCI 电源管理.\n");
+        IOLog("SimpleRTK5: Unsupport PCI Power Management.\n");
     }
     
     // 启用 PCI 电源管理并设置为 D0 状态（全速运行）
@@ -56,17 +76,17 @@ bool SimpleRTK5::initPCIConfigSpace(IOPCIDevice *provider)
     {
         pcieLinkCap = provider->configRead32(pcieCapOffset + kIOPCIELinkCapability);
         pcieLinkCtl = provider->configRead16(pcieCapOffset + kIOPCIELinkControl);
-        DebugLog("SimpleRTK5: PCIe 链路能力: 0x%08x, 控制: 0x%04x.\n", pcieLinkCap, pcieLinkCtl);
+        DebugLog("SimpleRTK5: PCIe capability: 0x%08x, control: 0x%04x.\n", pcieLinkCap, pcieLinkCtl);
 
         // 根据配置处理 ASPM (主动状态电源管理)
         if (linuxData.configASPM == 0)
         {
-            IOLog("SimpleRTK5: 禁用 PCIe ASPM.\n");
+            IOLog("SimpleRTK5: Disable PCIe ASPM.\n");
             provider->setASPMState(this, 0);
         }
         else
         {
-            IOLog("SimpleRTK5: 警告: 启用 PCIe ASPM.\n");
+            IOLog("SimpleRTK5: Warning: Enable PCIe ASPM.\n");
             provider->setASPMState(this, kIOPCIELinkCtlASPM | kIOPCIELinkCtlClkPM);
             linuxData.configASPM = 1;
         }
@@ -83,7 +103,7 @@ bool SimpleRTK5::initPCIConfigSpace(IOPCIDevice *provider)
 
     if (!baseMap)
     {
-        IOLog("SimpleRTK5: 区域 #2 不是 MMIO 资源，初始化中止.\n");
+        IOLog("SimpleRTK5: Field #2 not MMIO resources，stop initing.\n");
         return false;
     }
 
@@ -180,7 +200,7 @@ IOReturn SimpleRTK5::identifyChip()
         break;
         
     default:
-        DebugLog("SimpleRTK5: 未知芯片版本 (%x)\n", reg);
+        DebugLog("SimpleRTK5: Unknown ICVer (%x)\n", reg);
         tp->mcfg = CFG_METHOD_DEFAULT;
         tp->HwIcVerUnknown = true;
         tp->efuse_ver = EFUSE_NOT_SUPPORT;
@@ -200,7 +220,7 @@ bool SimpleRTK5::initRTL8126()
     // 步骤1：识别芯片
     if (identifyChip())
     {
-        IOLog("SimpleRTK5: 发现不支持的芯片，终止初始化.\n");
+        IOLog("SimpleRTK5: Unsupported Chip, stop initing. \n");
         return false;
     }
 
@@ -376,13 +396,13 @@ bool SimpleRTK5::initRTL8126()
     // 验证并设置 MAC 地址
     if (is_valid_ether_addr((UInt8 *)macAddr))
     {
-        IOLog("SimpleRTK5: 获取到 MAC 地址 %02x:%02x:%02x:%02x:%02x:%02x\n",
+        IOLog("SimpleRTK5: Get MAC addr %02x:%02x:%02x:%02x:%02x:%02x\n",
               macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
         rtl8126_rar_set(tp, macAddr);
     }
     else
     {
-        IOLog("SimpleRTK5: 使用回退 MAC 地址.\n");
+        IOLog("SimpleRTK5: Use fallback MAC addr.\n");
         rtl8126_rar_set(tp, fallBackMacAddr.bytes);
     }
 
@@ -415,11 +435,11 @@ bool SimpleRTK5::initRTL8126()
     WriteReg32(CounterAddrLow, (statPhyAddr & 0x00000000ffffffff) | CounterReset);
 
     rtl8126_disable_rxdvgate(tp);
-    IOLog("SimpleRTK5: 8126 初始化完成.\n");
+    IOLog("SimpleRTK5: 8126 init done.\n");
 
 #ifdef DEBUG
     if (wolCapable)
-        IOLog("SimpleRTK5: 设备支持 WoL.\n");
+        IOLog("SimpleRTK5: Device support WoL.\n");
 #endif
 
     result = true;
@@ -462,13 +482,13 @@ void SimpleRTK5::disableRTL8126()
     if (test_and_clear_bit(__LINK_UP, &stateFlags))
     {
         setLinkStatus(kIONetworkLinkValid);
-        IOLog("SimpleRTK5: en%u 链路断开\n", netif->getUnitNumber());
+        IOLog("SimpleRTK5: en%u link down.\n", netif->getUnitNumber());
     }
 }
 
 void SimpleRTK5::restartRTL8126()
 {
-    DebugLog("SimpleRTK5: 执行 restartRTL8126 ===>\n");
+    DebugLog("SimpleRTK5: restartRTL8126 ===>\n");
 
     // 停止输出线程并刷新队列
     if (netif) {
@@ -709,7 +729,7 @@ void SimpleRTK5::setupRTL8126()
     // 启用所有已知中断
     WriteReg32(IMR0_8125, intrMask);
 
-    DebugLog("SimpleRTK5: setup 完成 <===\n");
+    DebugLog("SimpleRTK5: setup <===\n");
     udelay(10);
 }
 
@@ -721,8 +741,8 @@ void SimpleRTK5::setPhyMedium()
     int ctrl_2500 = 0;
 
     // 如果不是固定速度，则启用自协商
-    if (speed != SPEED_2500 && (speed != SPEED_1000) &&
-        (speed != SPEED_100) && (speed != SPEED_10) && (speed != SPEED_5000))
+    if (speed != SPEED_5000 && (speed != SPEED_2500) && (speed != SPEED_1000) &&
+        (speed != SPEED_100) && (speed != SPEED_10))
     {
         duplex = DUPLEX_FULL;
         autoneg = AUTONEG_ENABLE;
@@ -732,12 +752,12 @@ void SimpleRTK5::setPhyMedium()
     if ((linuxData.eee_adv_t != 0) && (autoneg == AUTONEG_ENABLE))
     {
         rtl8126_enable_eee(tp);
-        DebugLog("SimpleRTK5: 启用 EEE 支持.\n");
+        DebugLog("SimpleRTK5: Enable EEE support.\n");
     }
     else
     {
         rtl8126_disable_eee(tp);
-        DebugLog("SimpleRTK5: 禁用 EEE 支持.\n");
+        DebugLog("SimpleRTK5: Disable EEE support.\n");
     }
 
     // 禁用 Giga Lite
@@ -817,7 +837,7 @@ void SimpleRTK5::setPhyMedium()
 void SimpleRTK5::setOffset79(UInt8 setting)
 {
     UInt8 deviceControl;
-    DebugLog("SimpleRTK5: 设置 Offset79 ===>\n");
+    DebugLog("SimpleRTK5: Offset79 ===>\n");
 
     if (!(linuxData.hwoptimize & HW_PATCH_SOC_LAN))
     {
@@ -1030,19 +1050,18 @@ UInt16 SimpleRTK5::getEEEMode()
 
     if (eeeCap)
     {
-        // 获取支持、通告、链路伙伴和启用的 EEE 状态
         sup = rtl8126_mdio_direct_read_phy_ocp(tp, 0xA5C4);
-        DebugLog("SimpleRTK5: EEE 支持: %u\n", sup);
+        DebugLog("SimpleRTK5: EEE sup: %u\n", sup);
 
         adv = rtl8126_mdio_direct_read_phy_ocp(tp, 0xA5D0);
-        DebugLog("SimpleRTK5: EEE 通告: %u\n", adv);
+        DebugLog("SimpleRTK5: EEE adv: %u\n", adv);
 
         lpa = rtl8126_mdio_direct_read_phy_ocp(tp, 0xA5D2);
-        DebugLog("SimpleRTK5: EEE 链路伙伴: %u\n", lpa);
+        DebugLog("SimpleRTK5: EEE lpa: %u\n", lpa);
 
         ena = rtl8126_mac_ocp_read(tp, 0xE040);
         ena &= BIT_1 | BIT_0;
-        DebugLog("SimpleRTK5: EEE 启用状态: %u\n", ena);
+        DebugLog("SimpleRTK5: EEE ena: %u\n", ena);
 
         eee = (sup & adv & lpa);
     }
