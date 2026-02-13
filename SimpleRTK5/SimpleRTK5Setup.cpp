@@ -6,94 +6,166 @@
 //
 
 /* LucyRTL8125Setup.cpp -- RTL8125 data structure initialzation methods.
-*
-* Copyright (c) 2020 Laura Müller <laura-mueller@uni-duesseldorf.de>
-* All rights reserved.
-*
-* This program is free software; you can redistribute it and/or modify it
-* under the terms of the GNU General Public License as published by the Free
-* Software Foundation; either version 2 of the License, or (at your option)
-* any later version.
-*
-* This program is distributed in the hope that it will be useful, but WITHOUT
-* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-* FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-* more details.
-*
-* Driver for Realtek RTL8125 PCIe 2.5GB ethernet controllers.
-*
-* This driver is based on Realtek's r8125 Linux driver (9.003.04).
-*/
+ *
+ * Copyright (c) 2020 Laura Müller <laura-mueller@uni-duesseldorf.de>
+ * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * Driver for Realtek RTL8125 PCIe 2.5GB ethernet controllers.
+ *
+ * This driver is based on Realtek's r8125 Linux driver (9.003.04).
+ */
 
 #include "SimpleRTK5Ethernet.hpp"
 
 static const char *onName = "enabled";
 static const char *offName = "disabled";
 
+#define ADV_ALL (ADVERTISED_10baseT_Half | ADVERTISED_10baseT_Full | ADVERTISED_100baseT_Half | ADVERTISED_100baseT_Full | ADVERTISED_1000baseT_Full | ADVERTISED_2500baseX_Full)
+
+struct rtlMediumTable mediumArray[MIDX_COUNT] = {
+    { .type = kIOMediumEthernetAuto, .spd = 0, .idx = MIDX_AUTO, .speed = 0, .duplex = DUPLEX_FULL, .fc = srtk5_fc_none, .eee = kEEETypeNo, .adv = ADV_ALL },
+
+    /* 10Base-T */
+    { .type = (kIOMediumEthernet10BaseT | IFM_HDX), .spd = kSpeed10MBit, .idx = MIDX_10HD, .speed = SPEED_10, .duplex = DUPLEX_HALF, .fc = srtk5_fc_none, .eee = kEEETypeNo, .adv = ADVERTISED_10baseT_Half },
+    { .type = (kIOMediumEthernet10BaseT | IFM_FDX), .spd = kSpeed10MBit, .idx = MIDX_10FD, .speed = SPEED_10, .duplex = DUPLEX_FULL, .fc = srtk5_fc_none, .eee = kEEETypeNo, .adv = ADVERTISED_10baseT_Full },
+
+    /* 100Base-T */
+    { .type = (kIOMediumEthernet100BaseTX | IFM_HDX), .spd = kSpeed100MBit, .idx = MIDX_100HD, .speed = SPEED_100, .duplex = DUPLEX_HALF, .fc = srtk5_fc_none, .eee = kEEETypeNo, .adv = ADVERTISED_100baseT_Half },
+    { .type = (kIOMediumEthernet100BaseTX | IFM_FDX), .spd = kSpeed100MBit, .idx = MIDX_100FD, .speed = SPEED_100, .duplex = DUPLEX_FULL, .fc = srtk5_fc_none, .eee = kEEETypeNo, .adv = ADVERTISED_100baseT_Full },
+    { .type = (kIOMediumEthernet100BaseTX | IFM_FDX | IFM_FLOW), .spd = kSpeed100MBit, .idx = MIDX_100FDFC, .speed = SPEED_100, .duplex = DUPLEX_FULL, .fc = srtk5_fc_full, .eee = kEEETypeNo, .adv = ADVERTISED_100baseT_Full },
+    { .type = (kIOMediumEthernet100BaseTX | IFM_FDX | IFM_EEE), .spd = kSpeed100MBit, .idx = MIDX_100FD_EEE, .speed = SPEED_100, .duplex = DUPLEX_FULL, .fc = srtk5_fc_none, .eee = kEEETypeYes, .adv = ADVERTISED_100baseT_Full },
+    { .type = (kIOMediumEthernet100BaseTX | IFM_FDX | IFM_FLOW | IFM_EEE), .spd = kSpeed100MBit, .idx = MIDX_100FDFC_EEE, .speed = SPEED_100, .duplex = DUPLEX_FULL, .fc = srtk5_fc_full, .eee = kEEETypeYes, .adv = ADVERTISED_100baseT_Full },
+
+    /* 1000Base-T */
+    { .type = (kIOMediumEthernet1000BaseT | IFM_FDX), .spd = kSpeed1000MBit, .idx = MIDX_1000FD, .speed = SPEED_1000, .duplex = DUPLEX_FULL, .fc = srtk5_fc_none, .eee = kEEETypeNo, .adv = ADVERTISED_1000baseT_Full },
+    { .type = (kIOMediumEthernet1000BaseT | IFM_FDX | IFM_FLOW), .spd = kSpeed1000MBit, .idx = MIDX_1000FDFC, .speed = SPEED_1000, .duplex = DUPLEX_FULL, .fc = srtk5_fc_full, .eee = kEEETypeNo, .adv = ADVERTISED_1000baseT_Full },
+    { .type = (kIOMediumEthernet1000BaseT | IFM_FDX | IFM_EEE), .spd = kSpeed1000MBit, .idx = MIDX_1000FD_EEE, .speed = SPEED_1000, .duplex = DUPLEX_FULL, .fc = srtk5_fc_none, .eee = kEEETypeYes, .adv = ADVERTISED_1000baseT_Full },
+    { .type = (kIOMediumEthernet1000BaseT | IFM_FDX | IFM_FLOW | IFM_EEE), .spd = kSpeed1000MBit, .idx = MIDX_1000FDFC_EEE, .speed = SPEED_1000, .duplex = DUPLEX_FULL, .fc = srtk5_fc_full, .eee = kEEETypeYes, .adv = ADVERTISED_1000baseT_Full },
+
+    /* 2500Base-T */
+    { .type = (kIOMediumEthernet2500BaseT | IFM_FDX), .spd = kSpeed2500MBit, .idx = MIDX_2500FD, .speed = SPEED_2500, .duplex = DUPLEX_FULL, .fc = srtk5_fc_none, .eee = kEEETypeNo, .adv = ADVERTISED_2500baseX_Full },
+    { .type = (kIOMediumEthernet2500BaseT | IFM_FDX | IFM_FLOW), .spd = kSpeed2500MBit, .idx = MIDX_2500FDFC, .speed = SPEED_2500, .duplex = DUPLEX_FULL, .fc = srtk5_fc_full, .eee = kEEETypeNo, .adv = ADVERTISED_2500baseX_Full },
+    { .type = (kIOMediumEthernet2500BaseT | IFM_FDX | IFM_EEE), .spd = kSpeed2500MBit, .idx = MIDX_2500FD_EEE, .speed = SPEED_2500, .duplex = DUPLEX_FULL, .fc = srtk5_fc_none, .eee = kEEETypeYes, .adv = ADVERTISED_2500baseX_Full },
+    { .type = (kIOMediumEthernet2500BaseT | IFM_FDX | IFM_FLOW | IFM_EEE), .spd = kSpeed2500MBit, .idx = MIDX_2500FDFC_EEE, .speed = SPEED_2500, .duplex = DUPLEX_FULL, .fc = srtk5_fc_full, .eee = kEEETypeYes, .adv = ADVERTISED_2500baseX_Full },
+    
+    /* 5000Base-T */
+    { .type = (kIOMediumEthernet5000BaseT | IFM_FDX), .spd = kSpeed5000MBit, .idx = MIDX_5000FD, .speed = SPEED_5000, .duplex = DUPLEX_FULL, .fc = srtk5_fc_none, .eee = kEEETypeNo, .adv = 0 },
+    { .type = (kIOMediumEthernet5000BaseT | IFM_FDX | IFM_FLOW), .spd = kSpeed5000MBit, .idx = MIDX_5000FDFC, .speed = SPEED_5000, .duplex = DUPLEX_FULL, .fc = srtk5_fc_full, .eee = kEEETypeNo, .adv = 0 },
+    { .type = (kIOMediumEthernet5000BaseT | IFM_FDX | IFM_EEE), .spd = kSpeed5000MBit, .idx = MIDX_5000FD_EEE, .speed = SPEED_5000, .duplex = DUPLEX_FULL, .fc = srtk5_fc_none, .eee = kEEETypeYes, .adv = 0 },
+    { .type = (kIOMediumEthernet5000BaseT | IFM_FDX | IFM_FLOW | IFM_EEE), .spd = kSpeed5000MBit, .idx = MIDX_5000FDFC_EEE, .speed = SPEED_5000, .duplex = DUPLEX_FULL, .fc = srtk5_fc_full, .eee = kEEETypeYes, .adv = 0 },
+    
+    /* 10GBase-T */
+    { .type = (kIOMediumEthernet10GBaseT | IFM_FDX), .spd = kSpeed10000MBit, .idx = MIDX_10000FD, .speed = SPEED_10000, .duplex = DUPLEX_FULL, .fc = srtk5_fc_none, .eee = kEEETypeNo, .adv = 0 },
+    { .type = (kIOMediumEthernet10GBaseT | IFM_FDX | IFM_FLOW), .spd = kSpeed10000MBit, .idx = MIDX_10000FDFC, .speed = SPEED_10000, .duplex = DUPLEX_FULL, .fc = srtk5_fc_full, .eee = kEEETypeNo, .adv = 0 },
+    { .type = (kIOMediumEthernet10GBaseT | IFM_FDX | IFM_EEE), .spd = kSpeed10000MBit, .idx = MIDX_10000FD_EEE, .speed = SPEED_10000, .duplex = DUPLEX_FULL, .fc = srtk5_fc_none, .eee = kEEETypeYes, .adv = 0 },
+    { .type = (kIOMediumEthernet10GBaseT | IFM_FDX | IFM_FLOW | IFM_EEE), .spd = kSpeed10000MBit, .idx = MIDX_10000FDFC_EEE, .speed = SPEED_10000, .duplex = DUPLEX_FULL, .fc = srtk5_fc_full, .eee = kEEETypeYes, .adv = 0 },
+};
 
 #pragma mark --- data structure initialization methods ---
 
 void SimpleRTK5::getParams()
 {
     OSDictionary *params;
-    OSNumber *pollInt;
-    OSBoolean *enableEEE;
-    OSBoolean *tso4;
-    OSBoolean *tso6;
-    OSBoolean *csoV6;
-    OSBoolean *noASPM;
+    OSIterator *iterator;
     OSString *versionString;
     OSString *fbAddr;
-    UInt32 usInterval;
+    OSBoolean *tsoV4;
+    OSBoolean *tsoV6;
+    OSBoolean *aspm;
+    OSNumber *tv;
+    UInt32 interval;
     
+    if (version_major >= Tahoe) {
+        params = serviceMatching("AppleVTD");
+        
+        if (params) {
+            iterator = IOService::getMatchingServices(params);
+            
+            if (iterator) {
+                IOMapper *mp = OSDynamicCast(IOMapper, iterator->getNextObject());
+                
+                if (mp) {
+                    IOLog("SimpleRTK5: AppleVTD is enabled.");
+                    useAppleVTD = true;
+                }
+                iterator->release();
+            }
+            params->release();
+        }
+    }
     versionString = OSDynamicCast(OSString, getProperty(kDriverVersionName));
 
     params = OSDynamicCast(OSDictionary, getProperty(kParamName));
     
     if (params) {
-        noASPM = OSDynamicCast(OSBoolean, params->getObject(kDisableASPMName));
-        linuxData.configASPM = (noASPM) ? !(noASPM->getValue()) : 0;
-        
-        DebugLog("SimpleRTK5: PCIe ASPM support %s.\n", linuxData.configASPM ? onName : offName);
-        
-        enableEEE = OSDynamicCast(OSBoolean, params->getObject(kEnableEeeName));
-        
-        if (enableEEE)
-            linuxData.eee_enabled = (enableEEE->getValue()) ? 1 : 0;
-        else
-            linuxData.eee_enabled = 0;
-        
-        IOLog("SimpleRTK5: EEE support %s.\n", linuxData.eee_enabled ? onName : offName);
-        
-        tso4 = OSDynamicCast(OSBoolean, params->getObject(kEnableTSO4Name));
-        enableTSO4 = (tso4) ? tso4->getValue() : false;
+        tsoV4 = OSDynamicCast(OSBoolean, params->getObject(kEnableTSO4Name));
+        enableTSO4 = (tsoV4 != NULL) ? tsoV4->getValue() : false;
         
         IOLog("SimpleRTK5: TCP/IPv4 segmentation offload %s.\n", enableTSO4 ? onName : offName);
         
-        tso6 = OSDynamicCast(OSBoolean, params->getObject(kEnableTSO6Name));
-        enableTSO6 = (tso6) ? tso6->getValue() : false;
+        tsoV6 = OSDynamicCast(OSBoolean, params->getObject(kEnableTSO6Name));
+        enableTSO6 = (tsoV6 != NULL) ? tsoV6->getValue() : false;
         
         IOLog("SimpleRTK5: TCP/IPv6 segmentation offload %s.\n", enableTSO6 ? onName : offName);
         
-        csoV6 = OSDynamicCast(OSBoolean, params->getObject(kEnableCSO6Name));
-        enableCSO6 = (csoV6) ? csoV6->getValue() : false;
+        aspm = OSDynamicCast(OSBoolean, params->getObject(kEnableASPM));
+        enableASPM = (aspm != NULL) ? aspm->getValue() : false;
         
-        IOLog("SimpleRTK5: TCP/IPv6 checksum offload %s.\n", enableCSO6 ? onName : offName);
-        
-        pollInt = OSDynamicCast(OSNumber, params->getObject(kPollInt2500Name));
+        IOLog("SimpleRTK5: Active State Power Management %s.\n", enableASPM ? onName : offName);
 
-        if (pollInt) {
-            usInterval = pollInt->unsigned32BitValue();
+        tv = OSDynamicCast(OSNumber, params->getObject(kPollTime10GName));
+
+        if (tv != NULL) {
+            interval = tv->unsigned32BitValue();
             
-            if (usInterval > 150)
-                pollInterval2500 = 150000;
-            else if (usInterval < 75)
-                pollInterval2500 = 75000;
+            if (interval > 120)
+                pollTime10G = 120000;
+            else if (interval < 25)
+                pollTime10G = 25000;
             else
-                pollInterval2500 = usInterval * 1000;
+                pollTime10G = interval * 1000;
         } else {
-            pollInterval2500 = 110000;
+            pollTime10G = 100000;
         }
+        tv = OSDynamicCast(OSNumber, params->getObject(kPollTime5GName));
+
+        if (tv != NULL) {
+            interval = tv->unsigned32BitValue();
+            
+            if (interval > 200)
+                pollTime5G = 200000;
+            else if (interval < 100)
+                pollTime5G = 100000;
+            else
+                pollTime5G = interval * 1000;
+        } else {
+            pollTime5G = 120000;
+        }
+        tv = OSDynamicCast(OSNumber, params->getObject(kPollTime2GName));
+
+        if (tv != NULL) {
+            interval = tv->unsigned32BitValue();
+            
+            if (interval > 200)
+                pollTime2G = 200000;
+            else if (interval < 100)
+                pollTime2G = 100000;
+            else
+                pollTime2G = interval * 1000;
+        } else {
+            pollTime2G = 120000;
+        }
+        
         fbAddr = OSDynamicCast(OSString, params->getObject(kFallbackName));
         
         if (fbAddr) {
@@ -110,74 +182,47 @@ void SimpleRTK5::getParams()
             }
         }
     } else {
-        enableTSO4 = true;
-        enableTSO6 = true;
-        pollInterval2500 = 0;
+        /* Use default values in case of missing config data. */
+        enableTSO4 = false;
+        enableTSO6 = false;
+        enableASPM = false;
+        pollTime10G = 60000;
+        pollTime5G = 90000;
+        pollTime2G = 110000;
     }
     if (versionString)
-        IOLog("SimpleRTK5: SimpleRTK5Ethernet version %s starting.\n", versionString->getCStringNoCopy());
-    else
-        IOLog("SimpleRTK5: SimpleRTK5Ethernet starting.\n");
+        IOLog("SimpleRTK5: Version %s\n", versionString->getCStringNoCopy());
 }
-
-static IOMediumType mediumTypeArray[MEDIUM_INDEX_COUNT] = {
-    kIOMediumEthernetAuto,
-    (kIOMediumEthernet10BaseT | kIOMediumOptionHalfDuplex),
-    (kIOMediumEthernet10BaseT | kIOMediumOptionFullDuplex),
-    (kIOMediumEthernet100BaseTX | kIOMediumOptionHalfDuplex),
-    (kIOMediumEthernet100BaseTX | kIOMediumOptionFullDuplex),
-    (kIOMediumEthernet100BaseTX | kIOMediumOptionFullDuplex | kIOMediumOptionFlowControl),
-    (kIOMediumEthernet1000BaseT | kIOMediumOptionFullDuplex),
-    (kIOMediumEthernet1000BaseT | kIOMediumOptionFullDuplex | kIOMediumOptionFlowControl),
-    (kIOMediumEthernet100BaseTX | kIOMediumOptionFullDuplex | kIOMediumOptionEEE),
-    (kIOMediumEthernet100BaseTX | kIOMediumOptionFullDuplex | kIOMediumOptionFlowControl | kIOMediumOptionEEE),
-    (kIOMediumEthernet1000BaseT | kIOMediumOptionFullDuplex | kIOMediumOptionEEE),
-    (kIOMediumEthernet1000BaseT | kIOMediumOptionFullDuplex | kIOMediumOptionFlowControl | kIOMediumOptionEEE),
-    (kIOMediumEthernet2500BaseT | kIOMediumOptionFullDuplex),
-    (kIOMediumEthernet2500BaseT | kIOMediumOptionFullDuplex | kIOMediumOptionFlowControl),
-    (kIOMediumEthernet5000BaseT | kIOMediumOptionFullDuplex),
-    (kIOMediumEthernet5000BaseT | kIOMediumOptionFullDuplex | kIOMediumOptionFlowControl)
-};
-
-static UInt64 mediumSpeedArray[MEDIUM_INDEX_COUNT] = {
-    0,
-    10 * MBit,
-    10 * MBit,
-    100 * MBit,
-    100 * MBit,
-    100 * MBit,
-    1000 * MBit,
-    1000 * MBit,
-    100 * MBit,
-    100 * MBit,
-    1000 * MBit,
-    1000 * MBit,
-    2500 * MBit,
-    2500 * MBit,
-    5000 * MBit,
-    5000 * MBit,
-};
 
 bool SimpleRTK5::setupMediumDict()
 {
+    struct srtk5_private *tp = &linuxData;
     IONetworkMedium *medium;
+    UInt32 limit;
     UInt32 i;
     bool result = false;
 
-    mediumDict = OSDictionary::withCapacity(MEDIUM_INDEX_COUNT + 1);
+    if (HW_SUPP_PHY_LINK_SPEED_5000M(tp))
+        limit = MIDX_10000FD;
+    else if (HW_SUPP_PHY_LINK_SPEED_2500M(tp))
+        limit = MIDX_5000FD;
+    else
+        limit = MIDX_2500FD;
+    
+    mediumDict = OSDictionary::withCapacity(limit + 1);
 
     if (mediumDict) {
-        for (i = MEDIUM_INDEX_AUTO; i < MEDIUM_INDEX_COUNT; i++) {
-            medium = IONetworkMedium::medium(mediumTypeArray[i], mediumSpeedArray[i], 0, i);
+        for (i = MIDX_AUTO; i < limit; i++) {
+            medium = IONetworkMedium::medium(mediumArray[i].type, mediumArray[i].spd, 0, i);
             
             if (!medium)
-                goto error1;
+                goto error_med;
 
             result = IONetworkMedium::addMedium(mediumDict, medium);
             medium->release();
 
             if (!result)
-                goto error1;
+                goto error_med;
 
             mediumTable[i] = medium;
         }
@@ -185,24 +230,32 @@ bool SimpleRTK5::setupMediumDict()
     result = publishMediumDictionary(mediumDict);
     
     if (!result)
-        goto error1;
+        goto error_med;
 
 done:
     return result;
     
-error1:
+error_med:
     IOLog("SimpleRTK5: Error creating medium dictionary.\n");
     mediumDict->release();
     
-    for (i = MEDIUM_INDEX_AUTO; i < MEDIUM_INDEX_COUNT; i++)
+    for (i = MIDX_AUTO; i < MIDX_COUNT; i++)
         mediumTable[i] = NULL;
 
     goto done;
 }
 
+void SimpleRTK5::rtl812xMedium2Adv(struct srtk5_private *tp, UInt32 index)
+{
+    tp->speed = mediumArray[index].speed;
+    tp->duplex = mediumArray[index].duplex;
+    tp->fcpause = mediumArray[index].fc;
+    tp->advertising = mediumArray[index].adv;
+    tp->eee.eee_enabled = mediumArray[index].eee;
+}
+
 bool SimpleRTK5::initEventSources(IOService *provider)
 {
-    IOReturn intrResult;
     int msiIndex = -1;
     int intrIndex = 0;
     int intrType = 0;
@@ -216,7 +269,7 @@ bool SimpleRTK5::initEventSources(IOService *provider)
     }
     txQueue->retain();
     
-    while ((intrResult = pciDevice->getInterruptType(intrIndex, &intrType)) == kIOReturnSuccess) {
+    while (pciDevice->getInterruptType(intrIndex, &intrType) == kIOReturnSuccess) {
         if (intrType & kIOInterruptTypePCIMessaged){
             msiIndex = intrIndex;
             break;
@@ -226,19 +279,23 @@ bool SimpleRTK5::initEventSources(IOService *provider)
     if (msiIndex != -1) {
         DebugLog("SimpleRTK5: MSI interrupt index: %d\n", msiIndex);
         
-        interruptSource = IOInterruptEventSource::interruptEventSource(this, OSMemberFunctionCast(IOInterruptEventSource::Action, this, &SimpleRTK5::interruptHandler), provider, msiIndex);
+        if (useAppleVTD) {
+            interruptSource = IOInterruptEventSource::interruptEventSource(this, OSMemberFunctionCast(IOInterruptEventSource::Action, this, &SimpleRTK5::interruptOccurredVTD), provider, msiIndex);
+        } else {
+            interruptSource = IOInterruptEventSource::interruptEventSource(this, OSMemberFunctionCast(IOInterruptEventSource::Action, this, &SimpleRTK5::interruptOccurred), provider, msiIndex);
+        }
     }
     if (!interruptSource) {
         IOLog("SimpleRTK5: Error: MSI index was not found or MSI interrupt could not be enabled.\n");
-        goto error1;
+        goto error_intr;
     }
     workLoop->addEventSource(interruptSource);
     
-    timerSource = IOTimerEventSource::timerEventSource(this, OSMemberFunctionCast(IOTimerEventSource::Action, this, &SimpleRTK5::timerActionRTL8126));
+    timerSource = IOTimerEventSource::timerEventSource(this, OSMemberFunctionCast(IOTimerEventSource::Action, this, &SimpleRTK5::timerAction));
     
     if (!timerSource) {
         IOLog("SimpleRTK5: Failed to create IOTimerEventSource.\n");
-        goto error2;
+        goto error_timer;
     }
     workLoop->addEventSource(timerSource);
 
@@ -247,11 +304,11 @@ bool SimpleRTK5::initEventSources(IOService *provider)
 done:
     return result;
     
-error2:
+error_timer:
     workLoop->removeEventSource(interruptSource);
     RELEASE(interruptSource);
 
-error1:
+error_intr:
     IOLog("SimpleRTK5: Error initializing event sources.\n");
     txQueue->release();
     txQueue = NULL;
@@ -260,13 +317,13 @@ error1:
 
 bool SimpleRTK5::setupRxResources()
 {
-    IOPhysicalSegment rxSegment;
+    IOPhysicalAddress64 pa = 0;
     IODMACommand::Segment64 seg;
     mbuf_t m;
     UInt64 offset = 0;
+    UInt64 word1;
     UInt32 numSegs = 1;
     UInt32 i;
-    UInt32 opts1;
     bool result = false;
     
     /* Alloc rx mbuf_t array. */
@@ -276,7 +333,7 @@ bool SimpleRTK5::setupRxResources()
         IOLog("SimpleRTK5: Couldn't alloc receive buffer array.\n");
         goto done;
     }
-    rxMbufArray = (mbuf_t *)rxBufArrayMem;
+    rxBufArray = (rtlRxBufferInfo *)rxBufArrayMem;
 
     /* Create receiver descriptor array. */
     rxBufDesc = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task, (kIODirectionInOut | kIOMemoryPhysicallyContiguous | kIOMemoryHostPhysicallyContiguous | kIOMapInhibitCache), kRxDescSize, 0xFFFFFFFFFFFFFF00ULL);
@@ -312,70 +369,58 @@ bool SimpleRTK5::setupRxResources()
     
     /* Initialize rxDescArray. */
     bzero(rxDescArray, kRxDescSize);
-    rxDescArray[kRxLastDesc].opts1 = OSSwapHostToLittleInt32(RingEnd);
+    rxDescArray[kRxLastDesc].cmd.opts1 = OSSwapHostToLittleInt32(RingEnd);
 
-    for (i = 0; i < kNumRxDesc; i++) {
-        rxMbufArray[i] = NULL;
-    }
     rxNextDescIndex = 0;
-    
-    rxMbufCursor = IOMbufNaturalMemoryCursor::withSpecification(PAGE_SIZE, 1);
-    
-    if (!rxMbufCursor) {
-        IOLog("SimpleRTK5: Couldn't create rxMbufCursor.\n");
+    rxMapNextIndex = 0;
+
+    rxPool = SimpleRTK5RxPool::withCapacity(kRxPoolMbufCap, kRxPoolClstCap);
+
+    if (!rxPool) {
+        IOLog("SimpleRTK5: Couldn't alloc receive buffer pool.\n");
         goto error_segm;
     }
 
     /* Alloc receive buffers. */
     for (i = 0; i < kNumRxDesc; i++) {
-        m = allocatePacket(rxBufferSize);
-        
-        if (!m) {
-            IOLog("SimpleRTK5: Couldn't alloc receive buffer.\n");
-            goto error_buf;
-        }
-        rxMbufArray[i] = m;
-        
-        if (rxMbufCursor->getPhysicalSegments(m, &rxSegment, 1) != 1) {
-            IOLog("SimpleRTK5: getPhysicalSegments() for receive buffer failed.\n");
-            goto error_buf;
-        }
-        opts1 = (UInt32)rxSegment.length;
-        opts1 |= (i == kRxLastDesc) ? (RingEnd | DescOwn) : DescOwn;
-        rxDescArray[i].opts1 = OSSwapHostToLittleInt32(opts1);
-        rxDescArray[i].opts2 = 0;
-        rxDescArray[i].addr = OSSwapHostToLittleInt64(rxSegment.location);
-    }
-    
-    sparePktHead = sparePktTail = NULL;
+        m = rxPool->getPacket(kRxBufferSize, MBUF_WAITOK);
 
-    for (i = 0; i < kRxNumSpareMbufs; i++) {
-        m = allocatePacket(rxBufferSize);
-        
-        if (m) {
-            if (sparePktHead) {
-                mbuf_setnext(sparePktTail, m);
-                sparePktTail = m;
-                spareNum++;
-            } else {
-                sparePktHead = sparePktTail = m;
-                spareNum = 1;
-            }
+        if (!m) {
+            IOLog("SimpleRTK5: Couldn't get receive buffer from pool.\n");
+            goto error_buf;
+        }
+        rxBufArray[i].mbuf = m;
+
+        if (!useAppleVTD) {
+            word1 = (kRxBufferSize | DescOwn);
+
+            if (i == kRxLastDesc)
+                word1 |= RingEnd;
+
+            pa = mbuf_data_to_physical(mbuf_datastart(m));
+            rxBufArray[i].phyAddr = pa;
+
+            rxDescArray[i].buf.blen = OSSwapHostToLittleInt64(word1);
+            rxDescArray[i].buf.addr = OSSwapHostToLittleInt64(pa);
         }
     }
-    result = true;
-    
+    if (useAppleVTD)
+        result = setupRxMap();
+    else
+        result = true;
+
 done:
     return result;
     
 error_buf:
     for (i = 0; i < kNumRxDesc; i++) {
-        if (rxMbufArray[i]) {
-            freePacket(rxMbufArray[i]);
-            rxMbufArray[i] = NULL;
+        if (rxBufArray[i].mbuf) {
+            mbuf_freem_list(rxBufArray[i].mbuf);
+            rxBufArray[i].mbuf = NULL;
+            rxBufArray[i].phyAddr = 0;
         }
     }
-    RELEASE(rxMbufCursor);
+    RELEASE(rxPool);
 
 error_segm:
     rxDescDmaCmd->clearMemoryDescriptor();
@@ -392,35 +437,9 @@ error_prep:
 error_buff:
     IOFree(rxBufArrayMem, kRxBufArraySize);
     rxBufArrayMem = NULL;
-    rxMbufArray = NULL;
+    rxBufArray = NULL;
 
     goto done;
-}
-
-void SimpleRTK5::refillSpareBuffers()
-{
-    mbuf_t m;
-
-    while (spareNum < kRxNumSpareMbufs) {
-        m = allocatePacket(rxBufferSize);
-
-        if (!m)
-            break;
-        
-        mbuf_setnext(sparePktTail, m);
-        sparePktTail = m;
-        OSIncrementAtomic(&spareNum);
-    }
-}
-
-IOReturn SimpleRTK5::refillAction(OSObject *owner, void *arg1, void *arg2, void *arg3, void *arg4)
-{
-    SimpleRTK5 *ethCtlr = OSDynamicCast(SimpleRTK5, owner);
-    
-    if (ethCtlr) {
-        ethCtlr->refillSpareBuffers();
-    }
-    return kIOReturnSuccess;
 }
 
 bool SimpleRTK5::setupTxResources()
@@ -428,7 +447,6 @@ bool SimpleRTK5::setupTxResources()
     IODMACommand::Segment64 seg;
     UInt64 offset = 0;
     UInt32 numSegs = 1;
-    UInt32 i;
     bool result = false;
     
     /* Alloc tx mbuf_t array. */
@@ -438,7 +456,7 @@ bool SimpleRTK5::setupTxResources()
         IOLog("SimpleRTK5: Couldn't alloc transmit buffer array.\n");
         goto done;
     }
-    txMbufArray = (mbuf_t *)txBufArrayMem;
+    txBufArray = (rtlTxBufferInfo *)txBufArrayMem;
     
     /* Create transmitter descriptor array. */
     txBufDesc = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task, (kIODirectionInOut | kIOMemoryPhysicallyContiguous | kIOMemoryHostPhysicallyContiguous | kIOMapInhibitCache), kTxDescSize, 0xFFFFFFFFFFFFFF00ULL);
@@ -476,20 +494,25 @@ bool SimpleRTK5::setupTxResources()
     bzero(txDescArray, kTxDescSize);
     txDescArray[kTxLastDesc].opts1 = OSSwapHostToLittleInt32(RingEnd);
     
-    for (i = 0; i < kNumTxDesc; i++) {
-        txMbufArray[i] = NULL;
-    }
     txNextDescIndex = txDirtyDescIndex = 0;
     txTailPtr0 = txClosePtr0 = 0;
     txNumFreeDesc = kNumTxDesc;
-    txMbufCursor = IOMbufNaturalMemoryCursor::withSpecification(0x1000, kMaxSegs);
     
-    if (!txMbufCursor) {
-        IOLog("SimpleRTK5: Couldn't create txMbufCursor.\n");
-        goto error_segm;
+    if (useAppleVTD) {
+        result = setupTxMap();
+        
+        if (!result)
+            goto error_segm;
+    } else {
+        txMbufCursor = IOMbufNaturalMemoryCursor::withSpecification(0x4000, kMaxSegs);
+        
+        if (!txMbufCursor) {
+            IOLog("SimpleRTK5: Couldn't create txMbufCursor.\n");
+            goto error_segm;
+        }
+        result = true;
     }
-    result = true;
-    
+
 done:
     return result;
     
@@ -508,7 +531,7 @@ error_prep:
 error_buff:
     IOFree(txBufArrayMem, kTxBufArraySize);
     txBufArrayMem = NULL;
-    txMbufArray = NULL;
+    txBufArray = NULL;
     
     goto done;
 }
@@ -520,12 +543,19 @@ bool SimpleRTK5::setupStatResources()
     UInt32 numSegs = 1;
     bool result = false;
 
+    statCall = thread_call_allocate_with_options((thread_call_func_t) &runStatUpdateThread, (void *) this, THREAD_CALL_PRIORITY_KERNEL, 0);
+    
+    if (!statCall) {
+        IOLog("SimpleRTK5: Couldn't alloc thread_call.\n");
+        goto done;
+    }
+
     /* Create statistics dump buffer. */
     statBufDesc = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task, (kIODirectionIn | kIOMemoryPhysicallyContiguous | kIOMemoryHostPhysicallyContiguous | kIOMapInhibitCache), sizeof(RtlStatData), 0xFFFFFFFFFFFFFF00ULL);
     
     if (!statBufDesc) {
         IOLog("SimpleRTK5: Couldn't alloc statBufDesc.\n");
-        goto done;
+        goto error_mem;
     }
     
     if (statBufDesc->prepare() != kIOReturnSuccess) {
@@ -572,6 +602,9 @@ error_dma:
 
 error_prep:
     RELEASE(statBufDesc);
+    
+error_mem:
+    thread_call_free(statCall);
     goto done;
 }
 
@@ -579,39 +612,43 @@ void SimpleRTK5::freeRxResources()
 {
     UInt32 i;
         
+    if (useAppleVTD)
+        freeRxMap();
+
+    if (rxDescDmaCmd) {
+        rxDescDmaCmd->complete();
+        rxDescDmaCmd->clearMemoryDescriptor();
+        rxDescDmaCmd->release();
+        rxDescDmaCmd = NULL;
+    }
     if (rxBufDesc) {
         rxBufDesc->complete();
         rxBufDesc->release();
         rxBufDesc = NULL;
         rxPhyAddr = (IOPhysicalAddress64)NULL;
     }
-    RELEASE(rxMbufCursor);
+    RELEASE(rxPool);
     
-    for (i = 0; i < kNumRxDesc; i++) {
-        if (rxMbufArray[i]) {
-            freePacket(rxMbufArray[i]);
-            rxMbufArray[i] = NULL;
-        }
-    }
-    if (rxDescDmaCmd) {
-        rxDescDmaCmd->clearMemoryDescriptor();
-        rxDescDmaCmd->release();
-        rxDescDmaCmd = NULL;
-    }
     if (rxBufArrayMem) {
+        for (i = 0; i < kNumRxDesc; i++) {
+            if (rxBufArray[i].mbuf) {
+                mbuf_freem_list(rxBufArray[i].mbuf);
+                rxBufArray[i].mbuf = NULL;
+            }
+        }
         IOFree(rxBufArrayMem, kRxBufArraySize);
         rxBufArrayMem = NULL;
-        rxMbufArray = NULL;
-    }
-    if (sparePktHead) {
-        mbuf_freem(sparePktHead);
-        sparePktHead = sparePktTail = NULL;
-        spareNum = 0;
+        rxBufArray = NULL;
     }
 }
 
 void SimpleRTK5::freeTxResources()
 {
+    if (useAppleVTD)
+        freeTxMap();
+    else
+        RELEASE(txMbufCursor);
+
     if (txBufDesc) {
         txBufDesc->complete();
         txBufDesc->release();
@@ -626,18 +663,23 @@ void SimpleRTK5::freeTxResources()
     if (txBufArrayMem) {
         IOFree(txBufArrayMem, kTxBufArraySize);
         txBufArrayMem = NULL;
-        txMbufArray = NULL;
+        txBufArray = NULL;
     }
-    RELEASE(txMbufCursor);
 }
 
 void SimpleRTK5::freeStatResources()
 {
+    if (statCall) {
+        thread_call_cancel(statCall);
+        IOSleep(2);
+        thread_call_free(statCall);
+        statCall = NULL;
+    }
     if (statBufDesc) {
         statBufDesc->complete();
         statBufDesc->release();
         statBufDesc = NULL;
-        statPhyAddr = (IOPhysicalAddress64)NULL;
+        statPhyAddr = 0;
     }
     if (statDescDmaCmd) {
         statDescDmaCmd->clearMemoryDescriptor();
@@ -648,36 +690,71 @@ void SimpleRTK5::freeStatResources()
 
 void SimpleRTK5::clearRxTxRings()
 {
+    IOMemoryDescriptor *md;
     mbuf_t m;
-    UInt32 lastIndex = kTxLastDesc;
-    UInt32 opts1;
+    UInt64 word1;
     UInt32 i;
     
-    DebugLog("SimpleRTK5: clearDescriptors() ===>\n");
+    DebugLog("SimpleRTK5: clearRxTxRings() ===>\n");
     
+    if (useAppleVTD && txMapInfo) {
+        for (i = 0; i < kNumTxMemDesc; i++) {
+            md = txMapInfo->txMemIO[i];
+            
+            if (md && (md->getTag() == kIOMemoryActive)) {
+                md->complete();
+                md->setTag(kIOMemoryInactive);
+            }
+        }
+        txMapInfo->txNextMem2Use = txMapInfo->txNextMem2Free = 0;
+        txMapInfo->txNumFreeMem = kNumTxMemDesc;
+    }
     for (i = 0; i < kNumTxDesc; i++) {
-        txDescArray[i].opts1 = OSSwapHostToLittleInt32((i != lastIndex) ? 0 : RingEnd);
-        m = txMbufArray[i];
+        txDescArray[i].opts1 = OSSwapHostToLittleInt32((i != kTxLastDesc) ? 0 : RingEnd);
+        m = txBufArray[i].mbuf;
         
         if (m) {
             freePacket(m);
-            txMbufArray[i] = NULL;
+            txBufArray[i].mbuf = NULL;
+            txBufArray[i].numDescs = 0;
+            txBufArray[i].packetBytes = 0;
         }
     }
     txTailPtr0 = txClosePtr0 = 0;
     txDirtyDescIndex = txNextDescIndex = 0;
     txNumFreeDesc = kNumTxDesc;
-    
-    lastIndex = kRxLastDesc;
-    
+        
+    if (useAppleVTD)
+        rxMapBuffers(0, kNumRxMemDesc);
+
     for (i = 0; i < kNumRxDesc; i++) {
-        opts1 = rxBufferSize;
-        opts1 |= (i == kRxLastDesc) ? (RingEnd | DescOwn) : DescOwn;
-        rxDescArray[i].opts1 = OSSwapHostToLittleInt32(opts1);
-        rxDescArray[i].opts2 = 0;
+        word1 = (kRxBufferSize | DescOwn);
+        
+        if (i == kRxLastDesc)
+            word1 |= RingEnd;
+        
+        rxDescArray[i].buf.blen = OSSwapHostToLittleInt64(word1);
+        rxDescArray[i].buf.addr = OSSwapHostToLittleInt64(rxBufArray[i].phyAddr);
     }
     rxNextDescIndex = 0;
+    rxMapNextIndex = 0;
     deadlockWarn = 0;
+
+    /* Free packet fragments which haven't been upstreamed yet.  */
+    discardPacketFragment();
+
+    DebugLog("SimpleRTK5: clearRxTxRings() <===\n");
+}
+
+void SimpleRTK5::discardPacketFragment()
+{
+    /*
+     * In case there is a packet fragment which hasn't been enqueued yet
+     * we have to free it in order to prevent a memory leak.
+     */
+    if (rxPacketHead)
+        mbuf_freem_list(rxPacketHead);
     
-    DebugLog("SimpleRTK5: clearDescriptors() <===\n");
+    rxPacketHead = rxPacketTail = NULL;
+    rxPacketSize = 0;
 }

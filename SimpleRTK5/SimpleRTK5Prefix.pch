@@ -1,30 +1,29 @@
 //
-//  SimpleRTK5-Prefix.pch
-//  SimpleRTK5
+//  RTL812xLucyPrefix.pch
+//  RTL812xLucy
 //
-//  Created by laobamac on 2025/10/7.
-//
-
-//
-//  LucyRTL8125Ethernet-Prefix.pch
-//  LucyRTL8125Ethernet
-//
-//  Created by Laura Müller on 12.04.20.
-//  Copyright © 2020 Laura Müller. All rights reserved.
+//  Created by Laura Müller on 16.01.26.
 //
 
-#ifndef SimpleRTK5_Prefix_pch
-#define SimpleRTK5_Prefix_pch
-
-#define __PRIVATE_SPI__
+#ifndef PrefixHeader_pch
+#define PrefixHeader_pch
 
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
     
+#include <Availability.h>
+
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_8
+#define __PRIVATE_SPI__
+#endif
+
+//#include "kpi_interface.h"
+
 #include <libkern/libkern.h>
-#include <libkern/version.h>
 #include <libkern/OSAtomic.h>
+#include <libkern/crypto/rand.h>
+#include <libkern/OSKextLib.h>
 #include <machine/limits.h>
 #include <net/ethernet.h>
 #include <sys/socket.h>
@@ -39,14 +38,14 @@ extern "C" {
 #include <sys/errno.h>
 #include <sys/kpi_mbuf.h>
 #include <sys/time.h>
-
+    
 #ifdef __cplusplus
 }
 #endif // __cplusplus
 
 #ifdef __cplusplus
 
-typedef u_int32_t ifnet_ctl_cmd_t;
+//typedef u_int32_t ifnet_ctl_cmd_t;
 
 #include <IOKit/network/IONetworkInterface.h>
 #include <IOKit/network/IONetworkController.h>
@@ -68,5 +67,16 @@ typedef u_int32_t ifnet_ctl_cmd_t;
 
 #endif // __cplusplus
 
+#ifdef DEBUG
+#define DebugLog(args...) IOLog(args)
+#else
+#define DebugLog(args...)
+#endif
 
-#endif /* SimpleRTK5_Prefix_pch */
+//#define ENABLE_USE_FIRMWARE_FILE
+//#define USE_NEW_TX_DESC
+//#define DEBUG_INTR
+
+#include "linux/linux.h"
+
+#endif /* PrefixHeader_pch */

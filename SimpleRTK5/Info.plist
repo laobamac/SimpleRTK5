@@ -19,54 +19,48 @@
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
-	<string>$(MARKETING_VERSION)</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>IOKitPersonalities</key>
 	<dict>
-		<key>SimpleRTK5</key>
+		<key>Realtek</key>
 		<dict>
 			<key>CFBundleIdentifier</key>
 			<string>cn.laobamac.SimpleRTK5</string>
 			<key>Driver Parameters</key>
 			<dict>
-				<key>disableASPM</key>
-				<true/>
-				<key>enableCSO6</key>
-				<true/>
-				<key>enableEEE</key>
+				<key>enableASPM</key>
 				<true/>
 				<key>enableTSO4</key>
-				<true/>
+				<false/>
 				<key>enableTSO6</key>
-				<true/>
-				<key>fallbackMAC</key>
-				<string></string>
-				<key>µsPollInt2500</key>
-				<integer>110</integer>
+				<false/>
+				<key>µsPollTime10G</key>
+				<integer>100</integer>
+				<key>µsPollTime2G</key>
+				<integer>160</integer>
+				<key>µsPollTime5G</key>
+				<integer>120</integer>
 			</dict>
-			<key>Driver Version</key>
+			<key>DriverVersion</key>
 			<string>$MODULE_VERSION</string>
 			<key>IOClass</key>
 			<string>SimpleRTK5</string>
-			<key>IOPCIMatch</key>
-			<string>0x812610ec 0x500010ec</string>
+			<key>IOPCIPrimaryMatch</key>
+			<string>0x812510ec 0x81251186 0x300010ec 0x812610ec 0x500010ec</string>
+			<key>IOPCITunnelCompatible</key>
+			<false/>
 			<key>IOProbeScore</key>
-			<integer>2000</integer>
+			<integer>5000</integer>
 			<key>IOProviderClass</key>
 			<string>IOPCIDevice</string>
-			<key>Model</key>
-			<string>RTL8126</string>
-			<key>Vendor</key>
-			<string>Realtek</string>
 		</dict>
 	</dict>
-	<key>NSHumanReadableCopyright</key>
-	<string>Copyright © 2025 王孝慈 All rights reserved.</string>
 	<key>OSBundleLibraries</key>
 	<dict>
 		<key>com.apple.iokit.IONetworkingFamily</key>
-		<string>1.5.0</string>
+		<string>1.8.0</string>
 		<key>com.apple.iokit.IOPCIFamily</key>
-		<string>1.7</string>
+		<string>2.6</string>
 		<key>com.apple.kpi.bsd</key>
 		<string>8.10.0</string>
 		<key>com.apple.kpi.iokit</key>
@@ -78,5 +72,7 @@
 	</dict>
 	<key>OSBundleRequired</key>
 	<string>Network-Root</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2025 王孝慈. All rights reserved.</string>
 </dict>
 </plist>

@@ -5,1925 +5,1357 @@
 //  Created by laobamac on 2025/10/6.
 //
 
-/* LucyRTL8125Hardware.cpp -- RTL8125 hardware initialzation methods.
-*
-* Copyright (c) 2020 Laura Müller <laura-mueller@uni-duesseldorf.de>
-* All rights reserved.
-*
-* This program is free software; you can redistribute it and/or modify it
-* under the terms of the GNU General Public License as published by the Free
-* Software Foundation; either version 2 of the License, or (at your option)
-* any later version.
-*
-* This program is distributed in the hope that it will be useful, but WITHOUT
-* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-* FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-* more details.
-*
-* Driver for Realtek RTL8125 PCIe 2.5GB ethernet controllers.
-*
-* This driver is based on Realtek's r8125 Linux driver (9.003.04).
-*/
+/* RTL8125Hardware.hpp -- RTL812x hardware initialzation methods.
+ *
+ * Copyright (c) 2025 Laura Müller <laura-mueller@uni-duesseldorf.de>
+ * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * Driver for Realtek RTL812x PCIe 2.5/5/10Gbit Ethernet controllers.
+ *
+ * This driver is based on version 9.016.01 of Realtek's r8125 driver.
+ */
 
 #include "SimpleRTK5Ethernet.hpp"
+#include "linux/mdio.h"
+#include "r8125_dash.h"
+#include "rtl_eeprom.h"
 
-#pragma mark--- 硬件初始化方法 ---
+#pragma mark--- static data ---
 
-bool SimpleRTK5::initPCIConfigSpace(IOPCIDevice *provider)
-{
+static const char *speed5GName = "5 Gigabit";
+static const char *speed25GName = "2.5 Gigabit";
+static const char *speed1GName = "1 Gigabit";
+static const char *speed100MName = "100 Megabit";
+static const char *speed10MName = "10 Megabit";
+static const char *duplexFullName = "full-duplex";
+static const char *duplexHalfName = "half-duplex";
+static const char *offFlowName = "no flow-control";
+static const char *onFlowName = "flow-control";
+
+static const char *eeeNames[kEEETypeCount] = {"",
+                                              ", energy-efficient-ethernet"};
+
+#pragma mark--- PCIe configuration methods ---
+
+bool SimpleRTK5::initPCIConfigSpace(IOPCIDevice *provider) {
     IOByteCount pmCapOffset;
     UInt32 pcieLinkCap;
-    UInt16 pcieLinkCtl;
     UInt16 cmdReg;
     UInt16 pmCap;
     bool result = false;
 
-    // 确保 provider 存在
-    if (!provider) {
-        return false;
-    }
-
-    // 读取 PCI 供应商和设备 ID
+    /* Get vendor and device info. */
     pciDeviceData.vendor = provider->configRead16(kIOPCIConfigVendorID);
     pciDeviceData.device = provider->configRead16(kIOPCIConfigDeviceID);
-    pciDeviceData.subsystem_vendor = provider->configRead16(kIOPCIConfigSubSystemVendorID);
-    pciDeviceData.subsystem_device = provider->configRead16(kIOPCIConfigSubSystemID);
+    pciDeviceData.subsystem_vendor =
+        provider->configRead16(kIOPCIConfigSubSystemVendorID);
+    pciDeviceData.subsystem_device =
+        provider->configRead16(kIOPCIConfigSubSystemID);
 
-    // 配置电源管理功能
-    if (provider->extendedFindPCICapability(kIOPCIPowerManagementCapability, &pmCapOffset))
-    {
-        pmCap = provider->extendedConfigRead16(pmCapOffset + kIOPCIPMCapability);
-        DebugLog("SimpleRTK5: PCI Power Management: 0x%x.\n", pmCap);
+    /* Setup power management. */
+    if (provider->extendedFindPCICapability(kIOPCIPowerManagementCapability,
+                                            &pmCapOffset)) {
+        pmCap =
+            provider->extendedConfigRead16(pmCapOffset + kIOPCIPMCapability);
+        DebugLog("SimpleRTK5: PCI power management capabilities: 0x%x.\n",
+                 pmCap);
 
-        // 检查是否支持从 D3Cold 状态唤醒
-        if (pmCap & kPCIPMCPMESupportFromD3Cold)
-        {
+        if (pmCap & kPCIPMCPMESupportFromD3Cold) {
             wolCapable = true;
-            DebugLog("SimpleRTK5: Support D3 (cold) wake (PME#).\n");
+            DebugLog("SimpleRTK5: PME# from D3 (cold) supported.\n");
         }
         pciPMCtrlOffset = pmCapOffset + kIOPCIPMControl;
+    } else {
+        IOLog("SimpleRTK5: PCI power management unsupported.\n");
     }
-    else
-    {
-        IOLog("SimpleRTK5: Unsupport PCI Power Management.\n");
-    }
-    
-    // 启用 PCI 电源管理并设置为 D0 状态（全速运行）
     provider->enablePCIPowerManagement(kPCIPMCSPowerStateD0);
 
-    // 获取并配置 PCIe 链路信息
-    if (provider->extendedFindPCICapability(kIOPCIPCIExpressCapability, &pcieCapOffset))
-    {
-        pcieLinkCap = provider->configRead32(pcieCapOffset + kIOPCIELinkCapability);
-        pcieLinkCtl = provider->configRead16(pcieCapOffset + kIOPCIELinkControl);
-        DebugLog("SimpleRTK5: PCIe capability: 0x%08x, control: 0x%04x.\n", pcieLinkCap, pcieLinkCtl);
-
-        // 根据配置处理 ASPM (主动状态电源管理)
-        if (linuxData.configASPM == 0)
-        {
-            IOLog("SimpleRTK5: Disable PCIe ASPM.\n");
-            provider->setASPMState(this, 0);
-        }
-        else
-        {
-            IOLog("SimpleRTK5: Warning: Enable PCIe ASPM.\n");
-            provider->setASPMState(this, kIOPCIELinkCtlASPM | kIOPCIELinkCtlClkPM);
-            linuxData.configASPM = 1;
-        }
+    /* Get PCIe link information. */
+    if (provider->extendedFindPCICapability(kIOPCIPCIExpressCapability,
+                                            &pcieCapOffset)) {
+        pcieLinkCap = provider->extendedConfigRead32(pcieCapOffset +
+                                                     kIOPCIELinkCapability);
+        DebugLog("SimpleRTK5: PCIe link capability: 0x%08x.\n", pcieLinkCap);
     }
-
-    // 启用 PCI 设备总线主控和内存空间
+    /* Enable the device. */
     cmdReg = provider->configRead16(kIOPCIConfigCommand);
     cmdReg &= ~kIOPCICommandIOSpace;
-    cmdReg |= (kIOPCICommandBusMaster | kIOPCICommandMemorySpace | kIOPCICommandMemWrInvalidate);
+    cmdReg |= (kIOPCICommandBusMaster | kIOPCICommandMemorySpace |
+               kIOPCICommandMemWrInvalidate);
     provider->configWrite16(kIOPCIConfigCommand, cmdReg);
 
-    // 映射内存映射 I/O (MMIO) 资源
-    baseMap = provider->mapDeviceMemoryWithRegister(kIOPCIConfigBaseAddress2, kIOMapInhibitCache);
+    baseMap = provider->mapDeviceMemoryWithRegister(kIOPCIConfigBaseAddress2,
+                                                    kIOMapInhibitCache);
 
-    if (!baseMap)
-    {
-        IOLog("SimpleRTK5: Field #2 not MMIO resources，stop initing.\n");
-        return false;
+    if (!baseMap) {
+        IOLog("SimpleRTK5: region #2 not an MMIO resource, aborting.\n");
+        goto done;
     }
+    linuxData.mmio_addr =
+        reinterpret_cast<volatile void *>(baseMap->getVirtualAddress());
 
-    // 获取虚拟地址映射
-    baseAddr = reinterpret_cast<volatile void *>(baseMap->getVirtualAddress());
-    linuxData.mmio_addr = baseAddr;
+    linuxData.org_pci_offset_80 = provider->extendedConfigRead8(0x80);
+    linuxData.org_pci_offset_81 = provider->extendedConfigRead8(0x81);
+
     result = true;
 
+done:
     return result;
 }
 
-IOReturn SimpleRTK5::setPowerStateWakeAction(OSObject *owner, void *arg1, void *arg2, void *arg3, void *arg4)
-{
-    SimpleRTK5 *ethCtlr = OSDynamicCast(SimpleRTK5, owner);
-    
-    // 安全检查：确保转换成功且偏移量有效
-    if (!ethCtlr || !ethCtlr->pciPMCtrlOffset) {
-        return kIOReturnSuccess;
+void SimpleRTK5::setupASPM(IOPCIDevice *provider, bool allowL1) {
+    IOOptionBits aspmState = 0;
+    UInt32 pcieLinkCap = 0;
+
+    if (pcieCapOffset) {
+        pcieLinkCap = provider->extendedConfigRead32(pcieCapOffset +
+                                                     kIOPCIELinkCapability);
+        DebugLog("SimpleRTK5: PCIe link capability: 0x%08x.\n", pcieLinkCap);
+
+        if (enableASPM && (pcieLinkCap & kIOPCIELinkCapASPMCompl)) {
+            if (pcieLinkCap & kIOPCIELinkCapL0sSup)
+                aspmState |= kIOPCILinkControlASPMBitsL0s;
+
+            if ((pcieLinkCap & kIOPCIELinkCapL1Sup) && allowL1)
+                aspmState |= kIOPCILinkControlASPMBitsL1;
+
+            IOLog("SimpleRTK5: Enable PCIe ASPM: 0x%08x.\n", aspmState);
+        } else {
+            IOLog("SimpleRTK5: Disable PCIe ASPM.\n");
+        }
+        provider->setASPMState(this, aspmState);
     }
+}
 
-    IOPCIDevice *dev = ethCtlr->pciDevice;
-    UInt8 offset = ethCtlr->pciPMCtrlOffset;
-    UInt16 val16 = dev->extendedConfigRead16(offset);
+IOReturn SimpleRTK5::setPowerStateWakeAction(OSObject *owner, void *arg1,
+                                             void *arg2, void *arg3,
+                                             void *arg4) {
+    SimpleRTK5 *ethCtlr = OSDynamicCast(SimpleRTK5, owner);
+    IOPCIDevice *dev;
+    UInt16 val16;
+    UInt8 offset;
 
-    // 清除 PME 状态并设置电源状态为 D0 (唤醒)
-    val16 &= ~(kPCIPMCSPowerStateMask | kPCIPMCSPMEStatus | kPCIPMCSPMEEnable);
-    val16 |= kPCIPMCSPowerStateD0;
+    if (ethCtlr && ethCtlr->pciPMCtrlOffset) {
+        dev = ethCtlr->pciDevice;
+        offset = ethCtlr->pciPMCtrlOffset;
 
-    dev->extendedConfigWrite16(offset, val16);
-    
+        val16 = dev->extendedConfigRead16(offset);
+
+        val16 &=
+            ~(kPCIPMCSPowerStateMask | kPCIPMCSPMEStatus | kPCIPMCSPMEEnable);
+        val16 |= kPCIPMCSPowerStateD0;
+
+        dev->extendedConfigWrite16(offset, val16);
+    }
     return kIOReturnSuccess;
 }
 
-IOReturn SimpleRTK5::setPowerStateSleepAction(OSObject *owner, void *arg1, void *arg2, void *arg3, void *arg4)
-{
+IOReturn SimpleRTK5::setPowerStateSleepAction(OSObject *owner, void *arg1,
+                                              void *arg2, void *arg3,
+                                              void *arg4) {
     SimpleRTK5 *ethCtlr = OSDynamicCast(SimpleRTK5, owner);
-    
-    if (!ethCtlr || !ethCtlr->pciPMCtrlOffset) {
-        return kIOReturnSuccess;
+    IOPCIDevice *dev;
+    UInt16 val16;
+    UInt8 offset;
+
+    if (ethCtlr && ethCtlr->pciPMCtrlOffset) {
+        dev = ethCtlr->pciDevice;
+        offset = ethCtlr->pciPMCtrlOffset;
+
+        val16 = dev->extendedConfigRead16(offset);
+
+        val16 &=
+            ~(kPCIPMCSPowerStateMask | kPCIPMCSPMEStatus | kPCIPMCSPMEEnable);
+
+        if (ethCtlr->linuxData.wol_enabled)
+            val16 |=
+                (kPCIPMCSPMEStatus | kPCIPMCSPMEEnable | kPCIPMCSPowerStateD3);
+        else
+            val16 |= kPCIPMCSPowerStateD3;
+
+        dev->extendedConfigWrite16(offset, val16);
     }
-
-    IOPCIDevice *dev = ethCtlr->pciDevice;
-    UInt8 offset = ethCtlr->pciPMCtrlOffset;
-    UInt16 val16 = dev->extendedConfigRead16(offset);
-
-    // 准备进入睡眠状态
-    val16 &= ~(kPCIPMCSPowerStateMask | kPCIPMCSPMEStatus | kPCIPMCSPMEEnable);
-
-    // 如果启用了网络唤醒 (WoL)，启用 PME
-    if (ethCtlr->wolActive)
-        val16 |= (kPCIPMCSPMEStatus | kPCIPMCSPMEEnable | kPCIPMCSPowerStateD3);
-    else
-        val16 |= kPCIPMCSPowerStateD3;
-
-    dev->extendedConfigWrite16(offset, val16);
-    
     return kIOReturnSuccess;
 }
 
-IOReturn SimpleRTK5::identifyChip()
-{
-    struct rtl8126_private *tp = &linuxData;
-    IOReturn result = kIOReturnSuccess;
-    u32 reg, val32;
-    u32 ICVerID;
+bool SimpleRTK5::rtl812xIdentifyChip(struct srtk5_private *tp) {
+    UInt32 reg, val32;
+    UInt32 ICVerID;
+    bool result = true;
 
-    // 读取传输配置寄存器以识别芯片版本
-    val32 = ReadReg32(TxConfig);
+    val32 = RTL_R32(tp, TxConfig);
     reg = val32 & 0x7c800000;
     ICVerID = val32 & 0x00700000;
 
-    // 根据寄存器值判断硬件版本
-    switch (reg)
-    {
-    case 0x64800000:
-        if (ICVerID == 0x00000000)
-        {
-            tp->mcfg = CFG_METHOD_1;
-        }
-        else if (ICVerID == 0x100000)
-        {
+    tp->chipset = 0xffffffff;
+    tp->HwIcVerUnknown = false;
+
+    switch (reg) {
+    case 0x60800000:
+        if (ICVerID == 0x00000000) {
             tp->mcfg = CFG_METHOD_2;
-        }
-        else if (ICVerID == 0x200000)
-        {
+            tp->chipset = 0;
+        } else if (ICVerID == 0x100000) {
             tp->mcfg = CFG_METHOD_3;
-        }
-        else
-        {
+            tp->chipset = 1;
+        } else {
             tp->mcfg = CFG_METHOD_3;
-            tp->HwIcVerUnknown = true;
+            tp->chipset = 1;
+
+            tp->HwIcVerUnknown = TRUE;
         }
-        tp->efuse_ver = EFUSE_SUPPORT_V4;
+
+        // tp->efuse_ver = EFUSE_SUPPORT_V4;
         break;
-        
+
+    case 0x64000000:
+        if (ICVerID == 0x00000000) {
+            tp->mcfg = CFG_METHOD_4;
+            tp->chipset = 2;
+        } else if (ICVerID == 0x100000) {
+            tp->mcfg = CFG_METHOD_5;
+            tp->chipset = 3;
+        } else {
+            tp->mcfg = CFG_METHOD_5;
+            tp->chipset = 3;
+            tp->HwIcVerUnknown = TRUE;
+        }
+
+        // tp->efuse_ver = EFUSE_SUPPORT_V4;
+        break;
+
+    case 0x64800000:
+        if (ICVerID == 0x00000000) {
+            tp->mcfg = CFG_METHOD_31;
+            tp->chipset = 12;
+        } else if (ICVerID == 0x100000) {
+            tp->mcfg = CFG_METHOD_32;
+            tp->chipset = 13;
+        } else if (ICVerID == 0x200000) {
+            tp->mcfg = CFG_METHOD_33;
+            tp->chipset = 14;
+        } else {
+            tp->mcfg = CFG_METHOD_31;
+            tp->chipset = 12;
+            tp->HwIcVerUnknown = TRUE;
+        }
+
+        // tp->efuse_ver = EFUSE_SUPPORT_V4;
+        break;
+
+    case 0x68000000:
+        if (ICVerID == 0x00000000) {
+            tp->mcfg = CFG_METHOD_8;
+            tp->chipset = 6;
+        } else if (ICVerID == 0x100000) {
+            tp->mcfg = CFG_METHOD_9;
+            tp->chipset = 7;
+        } else {
+            tp->mcfg = CFG_METHOD_9;
+            tp->chipset = 7;
+            tp->HwIcVerUnknown = TRUE;
+        }
+        // tp->efuse_ver = EFUSE_SUPPORT_V4;
+        break;
+
+    case 0x68800000:
+        if (ICVerID == 0x00000000) {
+            tp->mcfg = CFG_METHOD_10;
+            tp->chipset = 8;
+        } else if (ICVerID == 0x100000) {
+            tp->mcfg = CFG_METHOD_11;
+            tp->chipset = 9;
+        } else {
+            tp->mcfg = CFG_METHOD_11;
+            tp->chipset = 9;
+            tp->HwIcVerUnknown = TRUE;
+        }
+        // tp->efuse_ver = EFUSE_SUPPORT_V4;
+        break;
+
+    case 0x70800000:
+        if (ICVerID == 0x00000000) {
+            tp->mcfg = CFG_METHOD_12;
+            tp->chipset = 10;
+        } else {
+            tp->mcfg = CFG_METHOD_12;
+            tp->chipset = 10;
+            tp->HwIcVerUnknown = TRUE;
+        }
+        // tp->efuse_ver = EFUSE_SUPPORT_V4;
+        break;
+
     default:
-        DebugLog("SimpleRTK5: Unknown ICVer (%x)\n", reg);
+        DebugLog("SimpleRTK5: Unknown chip version (%x)\n", reg);
         tp->mcfg = CFG_METHOD_DEFAULT;
-        tp->HwIcVerUnknown = true;
-        tp->efuse_ver = EFUSE_NOT_SUPPORT;
-        result = kIOReturnError;
+        tp->HwIcVerUnknown = TRUE;
+        // tp->efuse_ver = EFUSE_NOT_SUPPORT;
+        result = false;
         break;
     }
+
+    if (pciDeviceData.device == 0x8162) {
+        if (tp->mcfg == CFG_METHOD_3) {
+            tp->mcfg = CFG_METHOD_6;
+            tp->chipset = 4;
+        } else if (tp->mcfg == CFG_METHOD_5) {
+            tp->mcfg = CFG_METHOD_7;
+            tp->chipset = 5;
+        } else if (tp->mcfg == CFG_METHOD_11) {
+            tp->mcfg = CFG_METHOD_13;
+            tp->chipset = 11;
+        }
+    }
+    this->setProperty(kChipsetName, tp->chipset, 32);
+    this->setProperty(kUnknownRevisionName, tp->HwIcVerUnknown);
+
+    tp->srtk5_rx_config = rtlChipInfos[tp->chipset].RCR_Cfg;
+
+#ifdef ENABLE_USE_FIRMWARE_FILE
+    tp->fw_name = rtlChipFwInfos[tp->mcfg].fw_name;
+#else
+    tp->fw_name = NULL;
+#endif /* ENABLE_USE_FIRMWARE_FILE */
+
     return result;
 }
 
-bool SimpleRTK5::initRTL8126()
-{
-    struct rtl8126_private *tp = &linuxData;
-    UInt32 i;
-    UInt8 macAddr[MAC_ADDR_LEN];
+void SimpleRTK5::rtl812xInitMacAddr(struct srtk5_private *tp) {
+    struct IOEthernetAddress macAddr;
+    int i;
+
+    for (i = 0; i < kIOEthernetAddressSize; i++)
+        macAddr.bytes[i] = RTL_R8(tp, MAC0 + i);
+
+    *(u32 *)&macAddr.bytes[0] = RTL_R32(tp, BACKUP_ADDR0_8125);
+    *(u16 *)&macAddr.bytes[4] = RTL_R16(tp, BACKUP_ADDR1_8125);
+
+    if (is_valid_ether_addr((UInt8 *)&macAddr.bytes))
+        goto done;
+
+    if (is_valid_ether_addr((UInt8 *)&fallBackMacAddr.bytes)) {
+        memcpy(&macAddr.bytes, &fallBackMacAddr.bytes,
+               sizeof(struct IOEthernetAddress));
+        goto done;
+    }
+    /* Create a random Ethernet address. */
+    random_buf(&macAddr.bytes, kIOEthernetAddressSize);
+    macAddr.bytes[0] &= 0xfe; /* clear multicast bit */
+    macAddr.bytes[0] |= 0x02; /* set local assignment bit (IEEE802) */
+    DebugLog("SimpleRTK5: Using random MAC address.\n");
+
+done:
+    memcpy(&origMacAddr.bytes, &macAddr.bytes,
+           sizeof(struct IOEthernetAddress));
+    memcpy(&currMacAddr.bytes, &macAddr.bytes,
+           sizeof(struct IOEthernetAddress));
+
+    rtl812x_rar_set(&linuxData, (UInt8 *)&currMacAddr.bytes);
+}
+
+bool SimpleRTK5::rtl812xInit() {
+    struct srtk5_private *tp = &linuxData;
     bool result = false;
 
-    // 步骤1：识别芯片
-    if (identifyChip())
-    {
-        IOLog("SimpleRTK5: Unsupported Chip, stop initing. \n");
-        return false;
+    if (!rtl812xIdentifyChip(tp)) {
+        IOLog("SimpleRTK5: Unknown chipset. Aborting...\n");
+        goto done;
     }
+    IOLog("SimpleRTK5: Found %s (chipset %d)\n", rtlChipInfos[tp->chipset].name,
+          tp->chipset);
 
-    // 步骤2：初始化基础参数
-    tp->eee_adv_t = eeeCap = (MDIO_EEE_100TX | MDIO_EEE_1000T);
-    tp->phy_reset_enable = rtl8126_xmii_reset_enable;
-    tp->phy_reset_pending = rtl8126_xmii_reset_pending;
-    tp->max_jumbo_frame_size = rtl_chip_info[tp->chipset].jumbo_frame_sz;
+    tp->get_settings = srtk5_gset_xmii;
+    tp->phy_reset_enable = srtk5_xmii_reset_enable;
+    tp->phy_reset_pending = srtk5_xmii_reset_pending;
+    tp->link_ok = srtk5_xmii_link_ok;
 
-    // 根据硬件版本配置特定参数
-    switch (tp->mcfg)
-    {
-    case CFG_METHOD_1:
-    case CFG_METHOD_2:
-    case CFG_METHOD_3:
-        tp->HwPkgDet = (rtl8126_mac_ocp_read(tp, 0xDC00) >> 3) & 0x07;
-        tp->HwSuppNowIsOobVer = 1;
-        tp->HwPcieSNOffset = 0x174;
-        break;
-    default:
-        break;
+    if (!rtl812x_aspm_is_safe(tp)) {
+        IOLog("SimpleRTK5: Hardware doesn't support ASPM properly. Disable "
+              "it!\n");
+        enableASPM = false;
     }
+    setupASPM(pciDevice, enableASPM);
+    srtk5_init_software_variable(tp, enableASPM);
 
-#ifdef ENABLE_REALWOW_SUPPORT
-    rtl8126_get_realwow_hw_version(dev);
-#endif
+    /* Setup lpi timer. */
+    tp->eee.tx_lpi_timer = mtu + ETH_HLEN + 0x20;
 
-    // 处理 ASPM 相关偏移修正
-    if (linuxData.configASPM && (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3))
-    {
-        tp->org_pci_offset_99 = csiFun0ReadByte(0x99) & ~(BIT_5 | BIT_6);
-        tp->org_pci_offset_180 = csiFun0ReadByte(0x22c);
-    }
-
-    tp->org_pci_offset_80 = pciDevice->configRead8(0x80);
-    tp->org_pci_offset_81 = pciDevice->configRead8(0x81);
-    tp->use_timer_interrupt = true;
-
-    // 设置最大链路速度
-    tp->HwSuppMaxPhyLinkSpeed = 5000; // 5Gbps
-
-    // 配置校验和与短包填充
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        tp->ShortPacketSwChecksum = TRUE;
-        tp->UseSwPaddingShortPkt = TRUE;
-    }
-
-    // 配置魔术包版本
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        tp->HwSuppMagicPktVer = WAKEUP_MAGIC_PACKET_V3;
-        tp->HwSuppLinkChgWakeUpVer = 3;
-        tp->HwSuppD0SpeedUpVer = 1;
-        tp->HwSuppCheckPhyDisableModeVer = 3;
-    } else {
-        tp->HwSuppMagicPktVer = WAKEUP_MAGIC_PACKET_NOT_SUPPORT;
-    }
-
-    // 配置 TX No Close 版本
-    if (tp->mcfg == CFG_METHOD_1) {
-        tp->HwSuppTxNoCloseVer = 4;
-    } else if (tp->mcfg == CFG_METHOD_2 || tp->mcfg == CFG_METHOD_3) {
-        tp->HwSuppTxNoCloseVer = 5;
-    }
-
-    // 设置 TX 描述符掩码
-    switch (tp->HwSuppTxNoCloseVer)
-    {
-    case 5:
-    case 6:
-        tp->MaxTxDescPtrMask = MAX_TX_NO_CLOSE_DESC_PTR_MASK_V4;
-        break;
-    case 4:
-        tp->MaxTxDescPtrMask = MAX_TX_NO_CLOSE_DESC_PTR_MASK_V3;
-        break;
-    case 3:
-        tp->MaxTxDescPtrMask = MAX_TX_NO_CLOSE_DESC_PTR_MASK_V2;
-        break;
-    default:
-        tp->EnableTxNoClose = false;
-        break;
-    }
-
-    if (tp->HwSuppTxNoCloseVer > 0)
-        tp->EnableTxNoClose = true;
-
-    // 设置 RAM 代码版本
-    switch (tp->mcfg)
-    {
-    case CFG_METHOD_1: tp->sw_ram_code_ver = NIC_RAMCODE_VERSION_CFG_METHOD_1; break;
-    case CFG_METHOD_2: tp->sw_ram_code_ver = NIC_RAMCODE_VERSION_CFG_METHOD_2; break;
-    case CFG_METHOD_3: tp->sw_ram_code_ver = NIC_RAMCODE_VERSION_CFG_METHOD_3; break;
-    }
-
-    if (tp->HwIcVerUnknown)
-    {
-        tp->NotWrRamCodeToMicroP = true;
-        tp->NotWrMcuPatchCode = true;
-    }
-
-    // 配置 MCU 和队列
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        tp->HwSuppMacMcuVer = 2;
-        tp->MacMcuPageSize = RTL8126_MAC_MCU_PAGE_SIZE;
-        tp->HwSuppNumTxQueues = 2;
-        tp->HwSuppNumRxQueues = 4;
-    } else {
-        tp->HwSuppNumTxQueues = 1;
-        tp->HwSuppNumRxQueues = 1;
-    }
-
-    // 初始化中断版本
-    switch (tp->mcfg)
-    {
-    case CFG_METHOD_1: tp->HwSuppIsrVer = 2; break;
-    case CFG_METHOD_2:
-    case CFG_METHOD_3: tp->HwSuppIsrVer = 3; break;
-    default: tp->HwSuppIsrVer = 1; break;
-    }
-
-    // 配置 PTP 和 RSS
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        tp->HwSuppPtpVer = 2;
-        tp->HwSuppRssVer = 5;
-        tp->HwSuppIndirTblEntries = 128;
-    }
-
-    // 配置中断缓解
-    if (tp->mcfg == CFG_METHOD_1)
-        tp->HwSuppIntMitiVer = 4;
-    else if (tp->mcfg == CFG_METHOD_2 || tp->mcfg == CFG_METHOD_3)
-        tp->HwSuppIntMitiVer = 5;
-
-    // 配置 TCAM
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        tp->HwSuppTcamVer = 2;
-        tp->TcamNotValidReg = TCAM_NOTVALID_ADDR_V2;
-        tp->TcamValidReg = TCAM_VALID_ADDR_V2;
-        tp->TcamMaAddrcOffset = TCAM_MAC_ADDR_V2;
-        tp->TcamVlanTagOffset = TCAM_VLAN_TAG_V2;
-        tp->HwSuppExtendTallyCounterVer = 1;
-    }
-
-    // 读取自定义 LED 值和 WoL 选项
-    tp->NicCustLedValue = ReadReg16(CustomLED);
-    tp->wol_opts = rtl8126_get_hw_wol(tp);
-    tp->wol_enabled = (tp->wol_opts) ? WOL_ENABLED : WOL_DISABLED;
-    tp->max_jumbo_frame_size = rtl_chip_info[tp->chipset].jumbo_frame_sz;
-
-    wolCapable = (tp->wol_enabled == WOL_ENABLED);
-    tp->eee_adv_t = MDIO_EEE_1000T | MDIO_EEE_100TX | SUPPORTED_2500baseX_Full;
-
-    // 步骤3：硬件复位和上电序列
-    exitOOB();
-    rtl8126_powerup_pll(tp);
-    rtl8126_hw_init(tp);
-    rtl8126_nic_reset(tp);
-
-    // 获取 EEPROM 类型
-    rtl8126_eeprom_type(tp);
-    if (tp->eeprom_type == EEPROM_TYPE_93C46 || tp->eeprom_type == EEPROM_TYPE_93C56)
-        rtl8126_set_eeprom_sel_low(tp);
-
-    // 步骤4：读取 MAC 地址
-    for (i = 0; i < MAC_ADDR_LEN; i++)
-        macAddr[i] = ReadReg8(MAC0 + i);
-
-    // 某些版本从备份寄存器读取 MAC
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        *(UInt32 *)&macAddr[0] = RTL_R32(tp, BACKUP_ADDR0_8125);
-        *(UInt16 *)&macAddr[4] = RTL_R16(tp, BACKUP_ADDR1_8125);
-    }
-
-    // 验证并设置 MAC 地址
-    if (is_valid_ether_addr((UInt8 *)macAddr))
-    {
-        IOLog("SimpleRTK5: Get MAC addr %02x:%02x:%02x:%02x:%02x:%02x\n",
-              macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
-        rtl8126_rar_set(tp, macAddr);
-    }
-    else
-    {
-        IOLog("SimpleRTK5: Use fallback MAC addr.\n");
-        rtl8126_rar_set(tp, fallBackMacAddr.bytes);
-    }
-
-    // 保存原始 MAC 地址
-    for (i = 0; i < MAC_ADDR_LEN; i++)
-    {
-        currMacAddr.bytes[i] = ReadReg8(MAC0 + i);
-        origMacAddr.bytes[i] = currMacAddr.bytes[i];
-    }
-    
-    IOLog("SimpleRTK5: %s: (Chipset %d), MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
-          rtl_chip_info[tp->chipset].name, tp->chipset,
-          origMacAddr.bytes[0], origMacAddr.bytes[1],
-          origMacAddr.bytes[2], origMacAddr.bytes[3],
-          origMacAddr.bytes[4], origMacAddr.bytes[5]);
-
-    // 步骤5：配置命令寄存器和中断掩码
-    tp->cp_cmd = (ReadReg16(CPlusCmd) | RxChkSum);
-
-    intrMaskRxTx = (SYSErr | LinkChg | RxDescUnavail | TxOK | RxOK);
-    intrMaskTimer = (SYSErr | LinkChg | RxDescUnavail | PCSTimeout | RxOK);
+    intrMaskRxTx = (LinkChg | RxDescUnavail | TxOK | RxOK | SWInt);
+    intrMaskTimer = (LinkChg | PCSTimeout);
+    intrMaskPoll = (LinkChg);
     intrMask = intrMaskRxTx;
+    timerValue = 0;
 
-    // 获取 RxConfig 参数
-    rxConfigReg = rtl_chip_info[tp->chipset].RCR_Cfg;
-    rxConfigMask = rtl_chip_info[tp->chipset].RxConfigMask;
+    tp->cp_cmd |= RTL_R16(tp, CPlusCmd);
 
-    // 重置统计计数器
-    WriteReg32(CounterAddrHigh, (statPhyAddr >> 32));
-    WriteReg32(CounterAddrLow, (statPhyAddr & 0x00000000ffffffff) | CounterReset);
+    srtk5_exit_oob(tp);
 
-    rtl8126_disable_rxdvgate(tp);
-    IOLog("SimpleRTK5: 8126 init done.\n");
+    srtk5_powerup_pll(tp);
 
-#ifdef DEBUG
-    if (wolCapable)
-        IOLog("SimpleRTK5: Device support WoL.\n");
-#endif
+    rtl812xHwInit(tp);
+
+    srtk5_hw_reset(tp);
+
+    /* Get production from EEPROM */
+    srtk5_eeprom_type(tp);
+
+    if (tp->eeprom_type == EEPROM_TYPE_93C46 ||
+        tp->eeprom_type == EEPROM_TYPE_93C56)
+        srtk5_set_eeprom_sel_low(tp);
+
+    rtl812xInitMacAddr(tp);
 
     result = true;
+
+done:
     return result;
 }
 
-void SimpleRTK5::enableRTL8126()
-{
-    struct rtl8126_private *tp = &linuxData;
+void SimpleRTK5::rtl812xUp(struct srtk5_private *tp) {
+    rtl812xHwInit(tp);
+    srtk5_hw_reset(tp);
+    srtk5_powerup_pll(tp);
+    srtk5_hw_ephy_config(tp);
+    srtk5_hw_phy_config(tp, enableASPM);
+    rtl812xHwConfig(tp);
+}
+
+void SimpleRTK5::rtl812xEnable() {
+    struct srtk5_private *tp = &linuxData;
 
     setLinkStatus(kIONetworkLinkValid);
 
     intrMask = intrMaskRxTx;
+    timerValue = 0;
     clear_bit(__POLL_MODE, &stateFlags);
 
-    // 退出 OOB，初始化硬件，复位 NIC，上电 PLL
-    exitOOB();
-    rtl8126_hw_init(tp);
-    rtl8126_nic_reset(tp);
-    rtl8126_powerup_pll(tp);
-    rtl8126_hw_ephy_config(tp);
-    configPhyHardware();
-    setupRTL8126();
+    tp->rms = mtu + VLAN_ETH_HLEN + ETH_FCS_LEN;
 
-    setPhyMedium();
+    /* restore last modified mac address */
+    rtl812x_rar_set(&linuxData, (UInt8 *)&currMacAddr.bytes);
+    srtk5_check_hw_phy_mcu_code_ver(tp);
+
+    tp->resume_not_chg_speed = 0;
+
+    if (tp->check_keep_link_speed && srtk5_hw_d3_not_power_off(tp) &&
+        srtk5_wait_phy_nway_complete_sleep(tp) == 0)
+        tp->resume_not_chg_speed = 1;
+
+    srtk5_exit_oob(tp);
+    rtl812xUp(tp);
+
+    rtl812xSetPhyMedium(tp, tp->autoneg, tp->speed, tp->duplex,
+                        tp->advertising);
+
+    /* Enable link change interrupt. */
+    intrMask = intrMaskRxTx;
+    timerValue = 0;
+    RTL_W32(tp, IMR0_8125, intrMask);
 }
 
-void SimpleRTK5::disableRTL8126()
-{
-    struct rtl8126_private *tp = &linuxData;
+void SimpleRTK5::rtl812xSetMrrs(struct srtk5_private *tp, UInt8 setting) {
+    UInt8 devctl;
 
-    // 清除中断掩码以禁用所有中断
-    WriteReg32(IMR0_8125, 0);
-
-    // 复位并进入省电模式
-    rtl8126_nic_reset(tp);
-    hardwareD3Para();
-    powerDownPLL();
-
-    if (test_and_clear_bit(__LINK_UP, &stateFlags))
-    {
-        setLinkStatus(kIONetworkLinkValid);
-        IOLog("SimpleRTK5: en%u link down.\n", netif->getUnitNumber());
-    }
+    devctl = pciDevice->extendedConfigRead8(0x79);
+    devctl &= ~0x70;
+    devctl |= setting;
+    pciDevice->extendedConfigWrite8(0x79, devctl);
 }
 
-void SimpleRTK5::restartRTL8126()
-{
-    DebugLog("SimpleRTK5: restartRTL8126 ===>\n");
+void SimpleRTK5::rtl812xSetHwFeatures(struct srtk5_private *tp) {
+    UInt32 rxcfg = RTL_R32(tp, RxConfig);
 
-    // 停止输出线程并刷新队列
-    if (netif) {
-        netif->stopOutputThread();
-        netif->flushOutputQueue();
-    }
+    tp->srtk5_rx_config &= ~(AcceptErr | AcceptRunt);
+    rxcfg &= ~(AcceptErr | AcceptRunt);
+
+    tp->srtk5_rx_config |= (EnableInnerVlan | EnableOuterVlan);
+    rxcfg |= (EnableInnerVlan | EnableOuterVlan);
+
+    RTL_W32(tp, RxConfig, rxcfg);
+
+    tp->cp_cmd |= RxChkSum;
+
+    RTL_W16(tp, CPlusCmd, tp->cp_cmd);
+    RTL_R16(tp, CPlusCmd);
+}
+
+void SimpleRTK5::rtl812xHwInit(struct srtk5_private *tp) {
+    u32 csi_tmp;
+
+    srtk5_enable_aspm_clkreq_lock(tp, 0);
+    srtk5_enable_force_clkreq(tp, 0);
+
+    srtk5_set_reg_oobs_en_sel(tp, true);
+
+    // Disable UPS
+    srtk5_mac_ocp_write(tp, 0xD40A, srtk5_mac_ocp_read(tp, 0xD40A) & ~(BIT_4));
+
+#ifndef ENABLE_USE_FIRMWARE_FILE
+    srtk5_hw_mac_mcu_config(tp);
+#endif
+
+    /*disable ocp phy power saving*/
+    if (tp->mcfg == CFG_METHOD_2 || tp->mcfg == CFG_METHOD_3 ||
+        tp->mcfg == CFG_METHOD_6)
+        srtk5_disable_ocp_phy_power_saving(tp);
+
+    // Set PCIE uncorrectable error status mask pcie 0x108
+    csi_tmp = srtk5_csi_read(tp, 0x108);
+    csi_tmp |= BIT_20;
+    srtk5_csi_write(tp, 0x108, csi_tmp);
+
+    srtk5_enable_cfg9346_write(tp);
+    srtk5_disable_linkchg_wakeup(tp);
+    srtk5_disable_cfg9346_write(tp);
+    srtk5_disable_magic_packet(tp);
+    srtk5_disable_d0_speedup(tp);
+    // srtk5_set_pci_pme(tp, 0);
+
+    srtk5_enable_magic_packet(tp);
+
+#ifdef ENABLE_USE_FIRMWARE_FILE
+    if (tp->rtl_fw && !tp->resume_not_chg_speed)
+        srtk5_apply_firmware(tp);
+#endif
+}
+
+void SimpleRTK5::rtl812xDown(struct srtk5_private *tp) {
+    srtk5_irq_mask_and_ack(tp);
+    srtk5_hw_reset(tp);
+    clearRxTxRings();
+}
+
+void SimpleRTK5::rtl812xDisable() {
+    struct srtk5_private *tp = &linuxData;
+
+    rtl812xDown(tp);
+    srtk5_hw_d3_para(tp);
+    srtk5_powerdown_pll(tp);
+
+    if (HW_DASH_SUPPORT_DASH(tp))
+        srtk5_driver_stop(tp);
+}
+
+void SimpleRTK5::rtl812xRestart(struct srtk5_private *tp) {
+    /* Stop output thread and flush txQueue */
+    netif->stopOutputThread();
+    netif->flushOutputQueue();
 
     clear_bit(__LINK_UP, &stateFlags);
     setLinkStatus(kIONetworkLinkValid);
 
-    // 复位 NIC 并清理描述符环
-    rtl8126_nic_reset(&linuxData);
+    /* Reset NIC and cleanup both descriptor rings. */
+    srtk5_hw_reset(tp);
+
     clearRxTxRings();
 
-    // 重新初始化
-    enableRTL8126();
+    /* Reinitialize NIC. */
+    rtl812xEnable();
 }
 
-void SimpleRTK5::setupRTL8126()
-{
-    struct rtl8126_private *tp = &linuxData;
+void SimpleRTK5::rtl812xHwConfig(struct srtk5_private *tp) {
     UInt16 mac_ocp_data;
 
-    // 配置接收过滤器：拒绝错误、过短包，禁用多播等，准备复位
-    WriteReg32(RxConfig, ReadReg32(RxConfig) & ~(AcceptErr | AcceptRunt | AcceptBroadcast | AcceptMulticast | AcceptMyPhys | AcceptAllPhys));
+    srtk5_disable_rx_packet_filter(tp);
 
-    rtl8126_nic_reset(tp);
+    srtk5_hw_reset(tp);
 
-    // 解锁配置寄存器
-    WriteReg8(Cfg9346, ReadReg8(Cfg9346) | Cfg9346_Unlock);
+    srtk5_enable_cfg9346_write(tp);
 
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        WriteReg8(0xF1, ReadReg8(0xF1) & ~BIT_7);
-        WriteReg8(Config2, ReadReg8(Config2) & ~BIT_7);
-        WriteReg8(Config5, ReadReg8(Config5) & ~BIT_0);
-    }
+    srtk5_enable_force_clkreq(tp, 0);
+    srtk5_enable_aspm_clkreq_lock(tp, 0);
 
-    // 仅保留魔术包配置
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xC0B6);
-        mac_ocp_data &= BIT_0;
-        rtl8126_mac_ocp_write(tp, 0xC0B6, mac_ocp_data);
-    }
+    srtk5_set_eee_lpi_timer(tp);
 
-    if (tp->HwSuppExtendTallyCounterVer == 1) {
-        rtl8126_set_mac_ocp_bit(tp, 0xEA84, (BIT_1 | BIT_0));
-    }
+    // keep magic packet only
+    mac_ocp_data = srtk5_mac_ocp_read(tp, 0xC0B6);
+    mac_ocp_data &= BIT_0;
+    srtk5_mac_ocp_write(tp, 0xC0B6, mac_ocp_data);
 
-    // 填充统计计数器物理地址
-    WriteReg32(CounterAddrHigh, (statPhyAddr >> 32));
-    WriteReg32(CounterAddrLow, (statPhyAddr & 0x00000000ffffffff));
+    /* Fill tally counter address. */
+    RTL_W32(tp, CounterAddrHigh, (statPhyAddr >> 32));
+    RTL_W32(tp, CounterAddrLow, (statPhyAddr & 0x00000000ffffffff));
 
-    // 设置描述符环指针
+    /* Enable extended tally counter. */
+    srtk5_set_mac_ocp_bit(tp, 0xEA84, (BIT_1 | BIT_0));
+
+    /* Setup the descriptor rings. */
     txTailPtr0 = txClosePtr0 = 0;
     txNextDescIndex = txDirtyDescIndex = 0;
     txNumFreeDesc = kNumTxDesc;
     rxNextDescIndex = 0;
 
-    WriteReg32(TxDescStartAddrLow, (txPhyAddr & 0x00000000ffffffff));
-    WriteReg32(TxDescStartAddrLow + 4, (txPhyAddr >> 32));
-    WriteReg32(RxDescAddrLow, (rxPhyAddr & 0x00000000ffffffff));
-    WriteReg32(RxDescAddrLow + 4, (rxPhyAddr >> 32));
+    RTL_W32(tp, TxDescStartAddrLow, (txPhyAddr & 0x00000000ffffffff));
+    RTL_W32(tp, TxDescStartAddrHigh, (txPhyAddr >> 32));
+    RTL_W32(tp, RxDescAddrLow, (rxPhyAddr & 0x00000000ffffffff));
+    RTL_W32(tp, RxDescAddrHigh, (rxPhyAddr >> 32));
 
-    // 设置 DMA 突发大小和帧间隙
-    WriteReg32(TxConfig, (TX_DMA_BURST_unlimited << TxDMAShift) | (InterFrameGap << TxInterFrameGapShift));
+    /* Set DMA burst size and Interframe Gap Time */
+    RTL_W32(tp, TxConfig,
+            (TX_DMA_BURST_unlimited << TxDMAShift) |
+                (InterFrameGap << TxInterFrameGapShift));
 
-    if (tp->EnableTxNoClose)
-        WriteReg32(TxConfig, (ReadReg32(TxConfig) | BIT_6));
+    /* Enable TxNoClose. */
+    RTL_W32(tp, TxConfig, (RTL_R32(tp, TxConfig) | BIT_6));
 
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        WriteReg16(DOUBLE_VLAN_CONFIG, 0);
-    }
+    /* Disable double VLAN. */
+    RTL_W16(tp, DOUBLE_VLAN_CONFIG, 0);
 
-    // 特定版本的大量寄存器初始化序列
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3)
-    {
-        set_offset70F(tp, 0x27);
-        setOffset79(0x40);
-
-        rtl8126_csi_write(tp, 0x890, rtl8126_csi_read(tp, 0x890) & ~BIT(0));
-
-        // 禁用 RSS
-        WriteReg32(RSS_CTRL_8125, 0x00);
-        WriteReg16(Q_NUM_CTRL_8125, 0x0000);
-
-        WriteReg8(Config1, ReadReg8(Config1) & ~0x10);
-
-        rtl8126_mac_ocp_write(tp, 0xC140, 0xFFFF);
-        rtl8126_mac_ocp_write(tp, 0xC142, 0xFFFF);
-
-        // 处理 TX 描述符格式
-        mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xEB58);
-        if (tp->mcfg == CFG_METHOD_2 || tp->mcfg == CFG_METHOD_3)
-            mac_ocp_data &= ~(BIT_0 | BIT_1);
-        mac_ocp_data &= ~(BIT_0);
-        rtl8126_mac_ocp_write(tp, 0xEB58, mac_ocp_data);
-
-        WriteReg8(0xd8, ReadReg8(0xd8) & ~EnableRxDescV4_0);
-
-        mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xE614);
-        mac_ocp_data &= ~(BIT_10 | BIT_9 | BIT_8);
-        if (tp->EnableTxNoClose)
-            mac_ocp_data |= (4 << 8);
-        else
-            mac_ocp_data |= (3 << 8);
-
-        rtl8126_mac_ocp_write(tp, 0xE614, mac_ocp_data);
-
-        // 设置 TX 队列数为 1
-        mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xE63E);
-        mac_ocp_data &= ~(BIT_11 | BIT_10);
-        mac_ocp_data |= ((0 & 0x03) << 10);
-        rtl8126_mac_ocp_write(tp, 0xE63E, mac_ocp_data);
-
-        mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xE63E);
-        mac_ocp_data &= ~(BIT_5 | BIT_4);
-        mac_ocp_data |= ((0x02 & 0x03) << 4);
-        rtl8126_mac_ocp_write(tp, 0xE63E, mac_ocp_data);
-
-        rtl8126_clear_mac_ocp_bit(tp, 0xC0B4, BIT_0);
-        rtl8126_set_mac_ocp_bit(tp, 0xC0B4, BIT_0);
-
-        mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xC0B4);
-        mac_ocp_data |= (BIT_3 | BIT_2);
-        rtl8126_mac_ocp_write(tp, 0xC0B4, mac_ocp_data);
-
-        mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xEB6A);
-        mac_ocp_data &= ~(BIT_7 | BIT_6 | BIT_5 | BIT_4 | BIT_3 | BIT_2 | BIT_1 | BIT_0);
-        mac_ocp_data |= (BIT_5 | BIT_4 | BIT_1 | BIT_0);
-        rtl8126_mac_ocp_write(tp, 0xEB6A, mac_ocp_data);
-
-        mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xEB50);
-        mac_ocp_data &= ~(BIT_9 | BIT_8 | BIT_7 | BIT_6 | BIT_5);
-        mac_ocp_data |= (BIT_6);
-        rtl8126_mac_ocp_write(tp, 0xEB50, mac_ocp_data);
-
-        mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xE056);
-        mac_ocp_data &= ~(BIT_7 | BIT_6 | BIT_5 | BIT_4);
-        rtl8126_mac_ocp_write(tp, 0xE056, mac_ocp_data);
-
-        WriteReg8(TDFNR, 0x10);
-
-        mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xE040);
-        mac_ocp_data &= ~(BIT_12);
-        rtl8126_mac_ocp_write(tp, 0xE040, mac_ocp_data);
-
-        mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xEA1C);
-        mac_ocp_data &= ~(BIT_1 | BIT_0);
-        mac_ocp_data |= (BIT_0);
-        rtl8126_mac_ocp_write(tp, 0xEA1C, mac_ocp_data);
-
-        rtl8126_mac_ocp_write(tp, 0xE0C0, 0x4000);
-
-        rtl8126_set_mac_ocp_bit(tp, 0xE052, (BIT_6 | BIT_5));
-        rtl8126_clear_mac_ocp_bit(tp, 0xE052, BIT_3 | BIT_7);
-
-        mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xD430);
-        mac_ocp_data &= ~(BIT_11 | BIT_10 | BIT_9 | BIT_8 | BIT_7 | BIT_6 | BIT_5 | BIT_4 | BIT_3 | BIT_2 | BIT_1 | BIT_0);
-        mac_ocp_data |= 0x45F;
-        rtl8126_mac_ocp_write(tp, 0xD430, mac_ocp_data);
-
-        WriteReg8(0xD0, ReadReg8(0xD0) | BIT_6 | BIT_7);
-
-        rtl8126_disable_eee_plus(tp);
-
-        mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xEA1C);
-        mac_ocp_data &= ~(BIT_2);
-        if (tp->mcfg == CFG_METHOD_2 || tp->mcfg == CFG_METHOD_3)
-            mac_ocp_data &= ~(BIT_9 | BIT_8);
-        rtl8126_mac_ocp_write(tp, 0xEA1C, mac_ocp_data);
-
-        rtl8126_clear_tcam_entries(tp);
-
-        WriteReg16(0x1880, ReadReg16(0x1880) & ~(BIT_4 | BIT_5));
-    }
-
-    // 清理其他硬件参数
-    rtl8126_hw_clear_timer_int(tp);
-    rtl8126_hw_clear_int_miti(tp);
-    rtl8126_enable_exit_l1_mask(tp);
-
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        rtl8126_mac_ocp_write(tp, 0xE098, 0xC302);
-        
-        if (linuxData.configASPM) {
-            initPCIOffset99();
-            rtl8126_init_pci_offset_180(tp);
-        }
-    }
-
-    tp->cp_cmd &= ~(EnableBist | Macdbgo_oe | Force_halfdup |
-                    Force_rxflow_en | Force_txflow_en | Cxpl_dbg_sel |
-                    ASF | Macdbgo_sel);
-
-    WriteReg16(CPlusCmd, tp->cp_cmd);
-
-    // 设置最大 RX 缓冲区大小 (必须能容纳一个包)
-    WriteReg16(RxMaxSize, rxBufferSize - 1);
-
-    rtl8126_disable_rxdvgate(tp);
-
-    // 设置接收模式 (多播/广播)
-    setMulticastMode(test_bit(__M_CAST, &stateFlags));
-
-    // 根据 ASPM 配置更新配置寄存器
-    switch (tp->mcfg)
-    {
-    case CFG_METHOD_1:
-        if (linuxData.configASPM)
-        {
-            RTL_W8(tp, Config2, RTL_R8(tp, Config2) | BIT_7);
-            RTL_W8(tp, Config5, RTL_R8(tp, Config5) | BIT_0);
-        }
-        else
-        {
-            RTL_W8(tp, Config2, RTL_R8(tp, Config2) & ~BIT_7);
-            RTL_W8(tp, Config5, RTL_R8(tp, Config5) & ~BIT_0);
-        }
+    switch (tp->mcfg) {
+    case CFG_METHOD_2 ... CFG_METHOD_7:
+        srtk5_enable_tcam(tp);
         break;
+    }
+
+    srtk5_set_l1_l0s_entry_latency(tp);
+
+    rtl812xSetMrrs(tp, 0x40);
+
+    RTL_W32(tp, RSS_CTRL_8125, 0x00);
+
+    RTL_W16(tp, Q_NUM_CTRL_8125, 0);
+
+    RTL_W8(tp, Config1, RTL_R8(tp, Config1) & ~0x10);
+
+    srtk5_mac_ocp_write(tp, 0xC140, 0xFFFF);
+    srtk5_mac_ocp_write(tp, 0xC142, 0xFFFF);
+
+    /*
+     * Disabling the new tx descriptor format seems to prevent
+     * tx timeouts when using TSO.
+     */
+    mac_ocp_data = srtk5_mac_ocp_read(tp, 0xEB58);
+
+#ifdef USE_NEW_TX_DESC
+    mac_ocp_data |= (BIT_0);
+#else
+    mac_ocp_data &= ~(BIT_0);
+#endif /* USE_NEW_TX_DESC */
+
+    srtk5_mac_ocp_write(tp, 0xEB58, mac_ocp_data);
+
+    mac_ocp_data = srtk5_mac_ocp_read(tp, 0xE614);
+    mac_ocp_data &= ~(BIT_10 | BIT_9 | BIT_8);
+
+    if (tp->mcfg == CFG_METHOD_4 || tp->mcfg == CFG_METHOD_5 ||
+        tp->mcfg == CFG_METHOD_7)
+        mac_ocp_data |= ((2 & 0x07) << 8);
+    else
+        mac_ocp_data |= ((3 & 0x07) << 8);
+
+    srtk5_mac_ocp_write(tp, 0xE614, mac_ocp_data);
+
+    /* Set number of tx queues to 1. */
+    mac_ocp_data = srtk5_mac_ocp_read(tp, 0xE63E);
+    mac_ocp_data &= ~(BIT_11 | BIT_10);
+    srtk5_mac_ocp_write(tp, 0xE63E, mac_ocp_data);
+
+    mac_ocp_data = srtk5_mac_ocp_read(tp, 0xE63E);
+    mac_ocp_data &= ~(BIT_5 | BIT_4);
+    mac_ocp_data |= (0x02 << 4);
+    srtk5_mac_ocp_write(tp, 0xE63E, mac_ocp_data);
+
+    srtk5_enable_mcu(tp, 0);
+    srtk5_enable_mcu(tp, 1);
+
+    mac_ocp_data = srtk5_mac_ocp_read(tp, 0xC0B4);
+    mac_ocp_data |= (BIT_3 | BIT_2);
+    srtk5_mac_ocp_write(tp, 0xC0B4, mac_ocp_data);
+
+    mac_ocp_data = srtk5_mac_ocp_read(tp, 0xEB6A);
+    mac_ocp_data &=
+        ~(BIT_7 | BIT_6 | BIT_5 | BIT_4 | BIT_3 | BIT_2 | BIT_1 | BIT_0);
+    mac_ocp_data |= (BIT_5 | BIT_4 | BIT_1 | BIT_0);
+    srtk5_mac_ocp_write(tp, 0xEB6A, mac_ocp_data);
+
+    mac_ocp_data = srtk5_mac_ocp_read(tp, 0xEB50);
+    mac_ocp_data &= ~(BIT_9 | BIT_8 | BIT_7 | BIT_6 | BIT_5);
+    mac_ocp_data |= (BIT_6);
+    srtk5_mac_ocp_write(tp, 0xEB50, mac_ocp_data);
+
+    mac_ocp_data = srtk5_mac_ocp_read(tp, 0xE056);
+    mac_ocp_data &= ~(BIT_7 | BIT_6 | BIT_5 | BIT_4);
+    // mac_ocp_data |= (BIT_4 | BIT_5);
+    srtk5_mac_ocp_write(tp, 0xE056, mac_ocp_data);
+
+    RTL_W8(tp, TDFNR, 0x10);
+
+    mac_ocp_data = srtk5_mac_ocp_read(tp, 0xE040);
+    mac_ocp_data &= ~(BIT_12);
+    srtk5_mac_ocp_write(tp, 0xE040, mac_ocp_data);
+
+    mac_ocp_data = srtk5_mac_ocp_read(tp, 0xEA1C);
+    mac_ocp_data &= ~(BIT_1 | BIT_0);
+    mac_ocp_data |= (BIT_0);
+    srtk5_mac_ocp_write(tp, 0xEA1C, mac_ocp_data);
+
+    switch (tp->mcfg) {
     case CFG_METHOD_2:
     case CFG_METHOD_3:
-        if (linuxData.configASPM)
-        {
-            RTL_W8(tp, INT_CFG0_8125, RTL_R8(tp, INT_CFG0_8125) | BIT_3);
-            RTL_W8(tp, Config5, RTL_R8(tp, Config5) | BIT_0);
-        }
-        else
-        {
-            RTL_W8(tp, INT_CFG0_8125, RTL_R8(tp, INT_CFG0_8125) & ~BIT_3);
-            RTL_W8(tp, Config5, RTL_R8(tp, Config5) & ~BIT_0);
-        }
+    case CFG_METHOD_6:
+    case CFG_METHOD_8:
+    case CFG_METHOD_9:
+    case CFG_METHOD_12:
+        srtk5_oob_mutex_lock(tp);
         break;
     }
 
-    // 锁定配置寄存器
-    WriteReg8(Cfg9346, ReadReg8(Cfg9346) & ~Cfg9346_Unlock);
+    if (tp->mcfg == CFG_METHOD_10 || tp->mcfg == CFG_METHOD_11 ||
+        tp->mcfg == CFG_METHOD_13)
+        srtk5_mac_ocp_write(tp, 0xE0C0, 0x4403);
+    else
+        srtk5_mac_ocp_write(tp, 0xE0C0, 0x4000);
 
-    // 启用所有已知中断
-    WriteReg32(IMR0_8125, intrMask);
+    srtk5_set_mac_ocp_bit(tp, 0xE052, (BIT_6 | BIT_5));
+    srtk5_clear_mac_ocp_bit(tp, 0xE052, BIT_3 | BIT_7);
 
-    DebugLog("SimpleRTK5: setup <===\n");
+    switch (tp->mcfg) {
+    case CFG_METHOD_2:
+    case CFG_METHOD_3:
+    case CFG_METHOD_6:
+    case CFG_METHOD_8:
+    case CFG_METHOD_9:
+    case CFG_METHOD_12:
+        srtk5_oob_mutex_unlock(tp);
+        break;
+    }
+
+    mac_ocp_data = srtk5_mac_ocp_read(tp, 0xD430);
+    mac_ocp_data &= ~(BIT_11 | BIT_10 | BIT_9 | BIT_8 | BIT_7 | BIT_6 | BIT_5 |
+                      BIT_4 | BIT_3 | BIT_2 | BIT_1 | BIT_0);
+    mac_ocp_data |= 0x45F;
+    srtk5_mac_ocp_write(tp, 0xD430, mac_ocp_data);
+
+    // srtk5_mac_ocp_write(tp, 0xE0C0, 0x4F87);
+    if (!tp->DASH)
+        RTL_W8(tp, 0xD0, RTL_R8(tp, 0xD0) | BIT_6 | BIT_7);
+    else
+        RTL_W8(tp, 0xD0, RTL_R8(tp, 0xD0) & ~(BIT_6 | BIT_7));
+
+    if (tp->mcfg == CFG_METHOD_2 || tp->mcfg == CFG_METHOD_3 ||
+        tp->mcfg == CFG_METHOD_6)
+        RTL_W8(tp, MCUCmd_reg, RTL_R8(tp, MCUCmd_reg) | BIT_0);
+
+    if (tp->mcfg != CFG_METHOD_10 && tp->mcfg != CFG_METHOD_11 &&
+        tp->mcfg != CFG_METHOD_13)
+        srtk5_disable_eee_plus(tp);
+
+    mac_ocp_data = srtk5_mac_ocp_read(tp, 0xEA1C);
+    mac_ocp_data &= ~(BIT_2);
+    srtk5_mac_ocp_write(tp, 0xEA1C, mac_ocp_data);
+
+    srtk5_clear_tcam_entries(tp);
+
+    RTL_W16(tp, 0x1880, RTL_R16(tp, 0x1880) & ~(BIT_4 | BIT_5));
+
+    if (tp->HwSuppRxDescType == RX_DESC_RING_TYPE_4) {
+        RTL_W8(tp, 0xd8, RTL_R8(tp, 0xd8) & ~EnableRxDescV4_0);
+    }
+
+    if (tp->mcfg == CFG_METHOD_12) {
+        srtk5_clear_mac_ocp_bit(tp, 0xE00C, BIT_12);
+        srtk5_clear_mac_ocp_bit(tp, 0xC0C2, BIT_6);
+    }
+
+    // other hw parameters
+    srtk5_hw_clear_timer_int(tp);
+
+    srtk5_hw_clear_int_miti(tp);
+
+    srtk5_enable_exit_l1_mask(tp);
+
+    srtk5_mac_ocp_write(tp, 0xE098, 0xC302);
+
+    if (enableASPM && (tp->org_pci_offset_99 & (BIT_2 | BIT_5 | BIT_6)))
+        srtk5_init_pci_offset_99(tp);
+    else
+        srtk5_disable_pci_offset_99(tp);
+
+    if (enableASPM && (tp->org_pci_offset_180 & srtk5_get_l1off_cap_bits(tp)))
+        srtk5_init_pci_offset_180(tp);
+    else
+        srtk5_disable_pci_offset_180(tp);
+
+    if (tp->RequiredPfmPatch)
+        srtk5_set_pfm_patch(tp, 0);
+
+    tp->cp_cmd &= ~(EnableBist | Macdbgo_oe | Force_halfdup | Force_rxflow_en |
+                    Force_txflow_en | Cxpl_dbg_sel | ASF | Macdbgo_sel);
+
+    rtl812xSetHwFeatures(tp);
+
+    srtk5_set_rms(tp, tp->rms);
+
+    srtk5_disable_rxdvgate(tp);
+
+    /* Set Rx packet filter */
+    // srtk5_hw_set_rx_packet_filter(dev);
+    /* Set receiver mode. */
+    setMulticastMode(test_bit(__M_CAST, &stateFlags));
+
+    srtk5_enable_aspm_clkreq_lock(tp, enableASPM ? 1 : 0);
+
+    srtk5_disable_cfg9346_write(tp);
+
     udelay(10);
 }
 
-void SimpleRTK5::setPhyMedium()
-{
-    struct rtl8126_private *tp = netdev_priv(&linuxData);
+UInt32 SimpleRTK5::rtl812xGetHwCloPtr(struct srtk5_private *tp) {
+    UInt32 cloPtr;
+
+    if (tp->HwSuppTxNoCloseVer == 3)
+        cloPtr = RTL_R16(tp, tp->HwCloPtrReg);
+    else
+        cloPtr = RTL_R32(tp, tp->HwCloPtrReg);
+
+    return cloPtr;
+}
+
+void SimpleRTK5::rtl812xDoorbell(struct srtk5_private *tp, UInt32 txTailPtr) {
+    if (tp->HwSuppTxNoCloseVer > 3)
+        RTL_W32(tp, tp->SwTailPtrReg, txTailPtr);
+    else
+        RTL_W16(tp, tp->SwTailPtrReg, txTailPtr & 0xffff);
+}
+
+void SimpleRTK5::getChecksumResult(mbuf_t m, UInt32 status1, UInt32 status2) {
+    mbuf_csum_performed_flags_t performed = 0;
+    UInt32 value = 0;
+
+    if ((status2 & RxV4F) && !(status1 & RxIPF))
+        performed |= (MBUF_CSUM_DID_IP | MBUF_CSUM_IP_GOOD);
+
+    if (((status1 & RxTCPT) && !(status1 & RxTCPF)) ||
+        ((status1 & RxUDPT) && !(status1 & RxUDPF))) {
+        performed |= (MBUF_CSUM_DID_DATA | MBUF_CSUM_PSEUDO_HDR);
+        value = 0xffff; // fake a valid checksum value
+    }
+    if (performed)
+        mbuf_set_csum_performed(m, performed, value);
+}
+
+UInt32 SimpleRTK5::updateTimerValue(UInt32 status) {
+    UInt32 newTimerValue = 0;
+
+    if (status & (RxOK | TxOK)) {
+        newTimerValue = kTimerDefault;
+    }
+
+#ifdef DEBUG_INTR
+    if (status & PCSTimeout)
+        tmrInterrupts++;
+
+    if (totalDescs > maxTxPkt) {
+        maxTxPkt = totalDescs;
+    }
+#endif
+
+clear_count:
+    totalDescs = 0;
+    totalBytes = 0;
+
+    return newTimerValue;
+}
+
+#pragma mark--- link management methods ---
+
+void SimpleRTK5::rtl812xLinkOnPatch(struct srtk5_private *tp) {
+    UInt32 status;
+
+    rtl812xHwConfig(tp);
+
+    if (tp->mcfg == CFG_METHOD_2) {
+        if (srtk5_get_phy_status(tp) & FullDup)
+            RTL_W32(tp, TxConfig,
+                    (RTL_R32(tp, TxConfig) | (BIT_24 | BIT_25)) & ~BIT_19);
+        else
+            RTL_W32(tp, TxConfig,
+                    (RTL_R32(tp, TxConfig) | BIT_25) & ~(BIT_19 | BIT_24));
+    }
+
+    status = srtk5_get_phy_status(tp);
+
+    switch (tp->mcfg) {
+    case CFG_METHOD_2:
+    case CFG_METHOD_3:
+    case CFG_METHOD_4:
+    case CFG_METHOD_5:
+    case CFG_METHOD_6:
+    case CFG_METHOD_7:
+    case CFG_METHOD_8:
+    case CFG_METHOD_9:
+    case CFG_METHOD_12:
+    case CFG_METHOD_31:
+    case CFG_METHOD_32:
+    case CFG_METHOD_33:
+        if (status & _10bps)
+            srtk5_enable_eee_plus(tp);
+        break;
+
+    default:
+        break;
+    }
+
+    if (tp->RequiredPfmPatch)
+        srtk5_set_pfm_patch(tp, (status & _10bps) ? 1 : 0);
+
+    tp->phy_reg_aner = srtk5_mdio_read(tp, MII_EXPANSION);
+    tp->phy_reg_anlpar = srtk5_mdio_read(tp, MII_LPA);
+    tp->phy_reg_gbsr = srtk5_mdio_read(tp, MII_STAT1000);
+    tp->phy_reg_status_2500 = srtk5_mdio_direct_read_phy_ocp(tp, 0xA5D6);
+}
+
+void SimpleRTK5::rtl812xLinkDownPatch(struct srtk5_private *tp) {
+    tp->phy_reg_aner = 0;
+    tp->phy_reg_anlpar = 0;
+    tp->phy_reg_gbsr = 0;
+    tp->phy_reg_status_2500 = 0;
+
+    switch (tp->mcfg) {
+    case CFG_METHOD_2:
+    case CFG_METHOD_3:
+    case CFG_METHOD_4:
+    case CFG_METHOD_5:
+    case CFG_METHOD_6:
+    case CFG_METHOD_7:
+    case CFG_METHOD_8:
+    case CFG_METHOD_9:
+    case CFG_METHOD_12:
+    case CFG_METHOD_31:
+    case CFG_METHOD_32:
+    case CFG_METHOD_33:
+        srtk5_disable_eee_plus(tp);
+        break;
+
+    default:
+        break;
+    }
+    if (tp->RequiredPfmPatch)
+        srtk5_set_pfm_patch(tp, 1);
+
+    srtk5_hw_reset(tp);
+}
+
+void SimpleRTK5::rtl812xGetEEEMode(struct srtk5_private *tp) {
+    UInt32 adv, lp, sup;
+    UInt16 val;
+
+    /* Get supported EEE. */
+    val = srtk5_mdio_direct_read_phy_ocp(tp, 0xA5C4);
+    sup = mmd_eee_cap_to_ethtool_sup_t(val);
+    DebugLog("SimpleRTK5: EEE supported: %u\n", sup);
+
+    /* Get advertisement EEE */
+    val = srtk5_mdio_direct_read_phy_ocp(tp, 0xA5D0);
+    adv = mmd_eee_adv_to_ethtool_adv_t(val);
+    DebugLog("SimpleRTK5: EEE advertised: %u\n", adv);
+
+    /* Get LP advertisement EEE */
+    val = srtk5_mdio_direct_read_phy_ocp(tp, 0xA5D2);
+    lp = mmd_eee_adv_to_ethtool_adv_t(val);
+    DebugLog("SimpleRTK5: EEE link partner: %u\n", lp);
+
+    val = srtk5_mdio_direct_read_phy_ocp(tp, 0xA6D0);
+
+    if (val & RTK_LPA_EEE_ADVERTISE_2500FULL)
+        lp |= ADVERTISED_2500baseX_Full;
+
+    val = srtk5_mac_ocp_read(tp, 0xE040);
+    val &= BIT_1 | BIT_0;
+
+    tp->eee.eee_enabled = !!val;
+    tp->eee.eee_active = !!(sup & adv & lp);
+}
+
+void SimpleRTK5::rtl812xCheckLinkStatus(struct srtk5_private *tp) {
+    UInt32 status;
+
+    status = RTL_R32(tp, PHYstatus);
+
+    if ((status == 0xffffffff) || !(status & LinkStatus)) {
+        rtl812xLinkDownPatch(tp);
+
+        /* Stop watchdog and statistics updates. */
+        timerSource->cancelTimeout();
+        setLinkDown();
+
+        clearRxTxRings();
+    } else {
+        /* Get EEE mode. */
+        rtl812xGetEEEMode(tp);
+
+        /* Get link speed, duplex and flow-control mode. */
+        if (status & (TxFlowCtrl | RxFlowCtrl)) {
+            tp->fcpause = srtk5_fc_full;
+        } else {
+            tp->fcpause = srtk5_fc_none;
+        }
+        if (status & _2500bpsF) {
+            tp->speed = SPEED_2500;
+            tp->duplex = DUPLEX_FULL;
+        } else if (status & _1000bpsF) {
+            tp->speed = SPEED_1000;
+            tp->duplex = DUPLEX_FULL;
+        } else if (status & _100bps) {
+            tp->speed = SPEED_100;
+
+            if (status & FullDup) {
+                tp->duplex = DUPLEX_FULL;
+            } else {
+                tp->duplex = DUPLEX_HALF;
+            }
+        } else {
+            tp->speed = SPEED_10;
+
+            if (status & FullDup) {
+                tp->duplex = DUPLEX_FULL;
+            } else {
+                tp->duplex = DUPLEX_HALF;
+            }
+        }
+        rtl812xLinkOnPatch(tp);
+
+        setLinkUp();
+        timerSource->setTimeoutMS(kTimeoutMS);
+    }
+}
+
+void SimpleRTK5::setLinkUp() {
+    struct srtk5_private *tp = &linuxData;
+    const char *speedName;
+    const char *duplexName;
+    const char *flowName;
+    const char *eeeName;
+    UInt64 mediumSpeed;
+    UInt32 mediumIndex = MIDX_AUTO;
+    UInt32 spd = tp->speed;
+    UInt32 fc = tp->fcpause;
+    bool eee;
+
+    totalDescs = 0;
+    totalBytes = 0;
+
+    eee = tp->eee.eee_active;
+    eeeName = eeeNames[kEEETypeNo];
+
+    /* Get link speed, duplex and flow-control mode. */
+    if (fc == srtk5_fc_full) {
+        flowName = onFlowName;
+    } else {
+        flowName = offFlowName;
+    }
+    if (spd == SPEED_5000) {
+        mediumSpeed = kSpeed5000MBit;
+        speedName = speed5GName;
+        duplexName = duplexFullName;
+
+        if (fc == srtk5_fc_full) {
+            if (eee) {
+                mediumIndex = MIDX_5000FDFC_EEE;
+                eeeName = eeeNames[kEEETypeYes];
+            } else {
+                mediumIndex = MIDX_5000FDFC;
+                eeeName = eeeNames[kEEETypeNo];
+            }
+        } else {
+            if (eee) {
+                mediumIndex = MIDX_5000FD_EEE;
+                eeeName = eeeNames[kEEETypeYes];
+            } else {
+                mediumIndex = MIDX_5000FD;
+                eeeName = eeeNames[kEEETypeNo];
+            }
+        }
+    } else if (spd == SPEED_2500) {
+        mediumSpeed = kSpeed2500MBit;
+        speedName = speed25GName;
+        duplexName = duplexFullName;
+
+        if (fc == srtk5_fc_full) {
+            if (eee) {
+                mediumIndex = MIDX_2500FDFC_EEE;
+                eeeName = eeeNames[kEEETypeYes];
+            } else {
+                mediumIndex = MIDX_2500FDFC;
+                eeeName = eeeNames[kEEETypeNo];
+            }
+        } else {
+            if (eee) {
+                mediumIndex = MIDX_2500FD_EEE;
+                eeeName = eeeNames[kEEETypeYes];
+            } else {
+                mediumIndex = MIDX_2500FD;
+                eeeName = eeeNames[kEEETypeNo];
+            }
+        }
+    } else if (spd == SPEED_1000) {
+        mediumSpeed = kSpeed1000MBit;
+        speedName = speed1GName;
+        duplexName = duplexFullName;
+
+        if (fc == srtk5_fc_full) {
+            if (eee) {
+                mediumIndex = MIDX_1000FDFC_EEE;
+                eeeName = eeeNames[kEEETypeYes];
+            } else {
+                mediumIndex = MIDX_1000FDFC;
+            }
+        } else {
+            if (eee) {
+                mediumIndex = MIDX_1000FD_EEE;
+                eeeName = eeeNames[kEEETypeYes];
+            } else {
+                mediumIndex = MIDX_1000FD;
+            }
+        }
+    } else if (spd == SPEED_100) {
+        mediumSpeed = kSpeed100MBit;
+        speedName = speed100MName;
+
+        if (tp->duplex == DUPLEX_FULL) {
+            duplexName = duplexFullName;
+
+            if (fc == srtk5_fc_full) {
+                if (eee) {
+                    mediumIndex = MIDX_100FDFC_EEE;
+                    eeeName = eeeNames[kEEETypeYes];
+                } else {
+                    mediumIndex = MIDX_100FDFC;
+                }
+            } else {
+                if (eee) {
+                    mediumIndex = MIDX_100FD_EEE;
+                    eeeName = eeeNames[kEEETypeYes];
+                } else {
+                    mediumIndex = MIDX_100FD;
+                }
+            }
+        } else {
+            mediumIndex = MIDX_100HD;
+            duplexName = duplexHalfName;
+        }
+    } else {
+        mediumSpeed = kSpeed10MBit;
+        speedName = speed10MName;
+
+        if (tp->duplex == DUPLEX_FULL) {
+            mediumIndex = MIDX_10FD;
+            duplexName = duplexFullName;
+        } else {
+            mediumIndex = MIDX_10HD;
+            duplexName = duplexHalfName;
+        }
+    }
+    rxPacketHead = rxPacketTail = NULL;
+    rxPacketSize = 0;
+
+    /* Start hardware. */
+    RTL_W8(tp, ChipCmd, CmdTxEnb | CmdRxEnb);
+
+    set_bit(__LINK_UP, &stateFlags);
+    setLinkStatus(kIONetworkLinkValid | kIONetworkLinkActive,
+                  mediumTable[mediumIndex], mediumSpeed, NULL);
+
+    /* Start output thread, statistics update and watchdog. Also
+     * update poll params according to link speed.
+     */
+    bzero(&pollParms, sizeof(IONetworkPacketPollingParameters));
+
+    if (spd == SPEED_10) {
+        pollParms.lowThresholdPackets = 2;
+        pollParms.highThresholdPackets = 8;
+        pollParms.lowThresholdBytes = 0x400;
+        pollParms.highThresholdBytes = 0x1800;
+        pollParms.pollIntervalTime = 1000000; /* 1ms */
+    } else {
+        pollParms.lowThresholdPackets = 10;
+        pollParms.highThresholdPackets = 40;
+        pollParms.lowThresholdBytes = 0x1000;
+        pollParms.highThresholdBytes = 0x10000;
+
+        if (spd == SPEED_5000)
+            pollParms.pollIntervalTime = pollTime5G;
+        else if (spd == SPEED_2500)
+            pollParms.pollIntervalTime = pollTime2G;
+        else if (spd == SPEED_1000)
+            pollParms.pollIntervalTime = 170000; /* 170µs */
+        else
+            pollParms.pollIntervalTime = 1000000; /* 1ms */
+    }
+    netif->setPacketPollingParameters(&pollParms, 0);
+    DebugLog("SimpleRTK5: pollIntervalTime: %lluµs\n",
+             (pollParms.pollIntervalTime / 1000));
+
+    netif->startOutputThread();
+
+    IOLog("SimpleRTK5: Link up on en%u, %s, %s, %s%s\n", netif->getUnitNumber(),
+          speedName, duplexName, flowName, eeeName);
+}
+
+void SimpleRTK5::setLinkDown() {
+    struct srtk5_private *tp = &linuxData;
+
+    deadlockWarn = 0;
+
+    /* Stop output thread and flush output queue. */
+    netif->stopOutputThread();
+    netif->flushOutputQueue();
+
+    /* Update link status. */
+    clear_mask((__LINK_UP_M | __POLL_MODE_M), &stateFlags);
+    setLinkStatus(kIONetworkLinkValid);
+
+    rtl812xLinkDownPatch(tp);
+    clearRxTxRings();
+
+    /* Enable link change interrupt. */
+    intrMask = intrMaskRxTx;
+    timerValue = 0;
+    RTL_W32(tp, IMR0_8125, intrMask);
+
+    rtl812xSetPhyMedium(tp, tp->autoneg, tp->speed, tp->duplex,
+                        tp->advertising);
+
+    IOLog("SimpleRTK5: Link down on en%u\n", netif->getUnitNumber());
+}
+
+void SimpleRTK5::rtl812xSetPhyMedium(struct srtk5_private *tp, UInt8 autoneg,
+                                     UInt32 speed, UInt8 duplex, UInt64 adv) {
     int auto_nego = 0;
     int giga_ctrl = 0;
     int ctrl_2500 = 0;
 
-    // 如果不是固定速度，则启用自协商
-    if (speed != SPEED_5000 && (speed != SPEED_2500) && (speed != SPEED_1000) &&
-        (speed != SPEED_100) && (speed != SPEED_10))
-    {
+    DebugLog("SimpleRTK5: speed: %u, duplex: %u, adv: %llx\n",
+             static_cast<unsigned int>(speed), duplex, adv);
+
+    if (!srtk5_is_speed_mode_valid(speed)) {
+        speed = SPEED_2500;
         duplex = DUPLEX_FULL;
-        autoneg = AUTONEG_ENABLE;
+        adv |= tp->advertising;
     }
 
-    // 处理节能以太网 (EEE)
-    if ((linuxData.eee_adv_t != 0) && (autoneg == AUTONEG_ENABLE))
-    {
-        rtl8126_enable_eee(tp);
+    /* Enable or disable EEE support according to selected medium. */
+    if (tp->eee.eee_enabled && (autoneg == AUTONEG_ENABLE)) {
+        srtk5_enable_eee(tp);
         DebugLog("SimpleRTK5: Enable EEE support.\n");
-    }
-    else
-    {
-        rtl8126_disable_eee(tp);
+    } else {
+        srtk5_disable_eee(tp);
         DebugLog("SimpleRTK5: Disable EEE support.\n");
     }
+    if (enableGigaLite && (autoneg == AUTONEG_ENABLE))
+        srtk5_enable_giga_lite(tp, adv);
+    else
+        srtk5_disable_giga_lite(tp);
 
-    // 禁用 Giga Lite
-    rtl8126_clear_eth_phy_ocp_bit(tp, 0xA428, BIT_9);
-    rtl8126_clear_eth_phy_ocp_bit(tp, 0xA5EA, BIT_0 | BIT_1 | BIT_2);
-
-    // 读取当前控制寄存器
-    giga_ctrl = rtl8126_mdio_read(tp, MII_CTRL1000);
+    giga_ctrl = srtk5_mdio_read(tp, MII_CTRL1000);
     giga_ctrl &= ~(ADVERTISE_1000HALF | ADVERTISE_1000FULL);
-    ctrl_2500 = rtl8126_mdio_direct_read_phy_ocp(tp, 0xA5D4);
-    ctrl_2500 &= ~(RTK_ADVERTISE_2500FULL | RTK_ADVERTISE_5000FULL);
+    ctrl_2500 = srtk5_mdio_direct_read_phy_ocp(tp, 0xA5D4);
+    ctrl_2500 &= ~RTK_ADVERTISE_2500FULL;
 
-    auto_nego = rtl8126_mdio_read(tp, MII_ADVERTISE);
-    auto_nego &= ~(ADVERTISE_10HALF | ADVERTISE_10FULL |
-                   ADVERTISE_100HALF | ADVERTISE_100FULL |
-                   ADVERTISE_PAUSE_CAP | ADVERTISE_PAUSE_ASYM);
+    if (autoneg == AUTONEG_ENABLE) {
+        /*n-way force*/
+        auto_nego = srtk5_mdio_read(tp, MII_ADVERTISE);
+        auto_nego &=
+            ~(ADVERTISE_10HALF | ADVERTISE_10FULL | ADVERTISE_100HALF |
+              ADVERTISE_100FULL | ADVERTISE_PAUSE_CAP | ADVERTISE_PAUSE_ASYM);
 
-    // 配置通告能力
-    if (autoneg == AUTONEG_ENABLE)
-    {
-        // 默认全能通告
-        auto_nego |= (ADVERTISE_10HALF | ADVERTISE_10FULL | ADVERTISE_100HALF | ADVERTISE_100FULL);
-        giga_ctrl |= ADVERTISE_1000FULL;
-        ctrl_2500 |= (RTK_ADVERTISE_2500FULL | RTK_ADVERTISE_5000FULL);
-    }
-    else if (speed == SPEED_5000)
-    {
-        ctrl_2500 |= RTK_ADVERTISE_5000FULL;
-    }
-    else if (speed == SPEED_2500)
-    {
-        ctrl_2500 |= RTK_ADVERTISE_2500FULL;
-    }
-    else if (speed == SPEED_1000)
-    {
-        if (duplex == DUPLEX_HALF)
-            giga_ctrl |= ADVERTISE_1000HALF;
-        else
-            giga_ctrl |= ADVERTISE_1000FULL;
-    }
-    else if (speed == SPEED_100)
-    {
-        if (duplex == DUPLEX_HALF)
-            auto_nego |= ADVERTISE_100HALF;
-        else
-            auto_nego |= ADVERTISE_100FULL;
-    }
-    else // SPEED_10
-    {
-        if (duplex == DUPLEX_HALF)
+        if (adv & ADVERTISED_10baseT_Half)
             auto_nego |= ADVERTISE_10HALF;
-        else
+        if (adv & ADVERTISED_10baseT_Full)
             auto_nego |= ADVERTISE_10FULL;
+        if (adv & ADVERTISED_100baseT_Half)
+            auto_nego |= ADVERTISE_100HALF;
+        if (adv & ADVERTISED_100baseT_Full)
+            auto_nego |= ADVERTISE_100FULL;
+        if (adv & ADVERTISED_1000baseT_Half)
+            giga_ctrl |= ADVERTISE_1000HALF;
+        if (adv & ADVERTISED_1000baseT_Full)
+            giga_ctrl |= ADVERTISE_1000FULL;
+        if (adv & ADVERTISED_2500baseX_Full)
+            ctrl_2500 |= RTK_ADVERTISE_2500FULL;
+
+        // flow control
+        if (tp->fcpause == srtk5_fc_full)
+            auto_nego |= ADVERTISE_PAUSE_CAP | ADVERTISE_PAUSE_ASYM;
+
+        tp->phy_auto_nego_reg = auto_nego;
+        tp->phy_1000_ctrl_reg = giga_ctrl;
+
+        tp->phy_2500_ctrl_reg = ctrl_2500;
+
+        srtk5_mdio_write(tp, 0x1f, 0x0000);
+        srtk5_mdio_write(tp, MII_ADVERTISE, auto_nego);
+        srtk5_mdio_write(tp, MII_CTRL1000, giga_ctrl);
+        srtk5_mdio_direct_write_phy_ocp(tp, 0xA5D4, ctrl_2500);
+        srtk5_phy_restart_nway(tp);
+    } else {
+        /*true force*/
+        if (speed == SPEED_10 || speed == SPEED_100)
+            srtk5_phy_setup_force_mode(tp, speed, duplex);
+        else
+            return;
     }
-
-    // 设置流控制
-    if (flowCtl == kFlowControlOn)
-        auto_nego |= (ADVERTISE_PAUSE_CAP | ADVERTISE_PAUSE_ASYM);
-
-    tp->phy_auto_nego_reg = auto_nego;
-    tp->phy_1000_ctrl_reg = giga_ctrl;
-    tp->phy_2500_ctrl_reg = ctrl_2500;
-
-    // 写入 PHY 寄存器并重启 N-Way 自协商
-    rtl8126_mdio_write(tp, 0x1f, 0x0000);
-    rtl8126_mdio_write(tp, MII_ADVERTISE, auto_nego);
-    rtl8126_mdio_write(tp, MII_CTRL1000, giga_ctrl);
-    rtl8126_mdio_direct_write_phy_ocp(tp, 0xA5D4, ctrl_2500);
-    rtl8126_phy_restart_nway(tp);
-    mdelay(20);
-
-    tp->autoneg = AUTONEG_ENABLE;
+    tp->autoneg = autoneg;
     tp->speed = speed;
     tp->duplex = duplex;
+    tp->advertising = adv;
+
+    srtk5_set_d0_speedup_speed(tp);
 }
 
-void SimpleRTK5::setOffset79(UInt8 setting)
-{
-    UInt8 deviceControl;
-    DebugLog("SimpleRTK5: Offset79 ===>\n");
+#pragma mark--- statistics update methods ---
 
-    if (!(linuxData.hwoptimize & HW_PATCH_SOC_LAN))
-    {
-        deviceControl = pciDevice->configRead8(0x79);
-        deviceControl &= ~0x70;
-        deviceControl |= setting;
-        pciDevice->configWrite8(0x79, deviceControl);
-    }
+void SimpleRTK5::rtl812xDumpTallyCounter(struct srtk5_private *tp) {
+    UInt32 cmd;
+
+    RTL_W32(tp, CounterAddrHigh, (statPhyAddr >> 32));
+    cmd = statPhyAddr & 0x00000000ffffffff;
+    RTL_W32(tp, CounterAddrLow, cmd);
+    RTL_W32(tp, CounterAddrLow, cmd | CounterDump);
 }
 
-UInt8 SimpleRTK5::csiFun0ReadByte(UInt32 addr)
-{
-    struct rtl8126_private *tp = &linuxData;
-    UInt8 retVal = 0;
-
-    if (tp->mcfg == CFG_METHOD_DEFAULT)
-    {
-        retVal = pciDevice->configRead8(addr);
-    }
-    else
-    {
-        UInt32 tmpUlong;
-        UInt8 shiftByte;
-
-        shiftByte = addr & (0x3);
-        tmpUlong = rtl8126_csi_other_fun_read(&linuxData, 0, addr);
-        tmpUlong >>= (8 * shiftByte);
-        retVal = (UInt8)tmpUlong;
-    }
-    udelay(20);
-
-    return retVal;
+void SimpleRTK5::runStatUpdateThread(thread_call_param_t param0) {
+    ((SimpleRTK5 *)param0)->statUpdateThread();
 }
 
-void SimpleRTK5::csiFun0WriteByte(UInt32 addr, UInt8 value)
-{
-    struct rtl8126_private *tp = &linuxData;
+/*
+ * Perform delayed mapping of a defined number of batches
+ * and set the ring state to indicate, that mapping is
+ * in progress.
+ */
+void SimpleRTK5::statUpdateThread() {
+    struct srtk5_private *tp = &linuxData;
+    UInt32 sgColl, mlColl;
 
-    if (tp->mcfg == CFG_METHOD_DEFAULT)
-    {
-        pciDevice->configWrite8(addr, value);
+    if (!(RTL_R32(tp, CounterAddrLow) & CounterDump)) {
+        netStats->inputPackets =
+            OSSwapLittleToHostInt64(statData->rxPackets) & 0x00000000ffffffff;
+        netStats->inputErrors = OSSwapLittleToHostInt32(statData->rxErrors);
+        netStats->outputPackets =
+            OSSwapLittleToHostInt64(statData->txPackets) & 0x00000000ffffffff;
+        netStats->outputErrors = OSSwapLittleToHostInt32(statData->txErrors);
+
+        sgColl = OSSwapLittleToHostInt32(statData->txOneCollision);
+        mlColl = OSSwapLittleToHostInt32(statData->txMultiCollision);
+        netStats->collisions = sgColl + mlColl;
+
+        etherStats->dot3StatsEntry.singleCollisionFrames = sgColl;
+        etherStats->dot3StatsEntry.multipleCollisionFrames = mlColl;
+        etherStats->dot3StatsEntry.alignmentErrors =
+            OSSwapLittleToHostInt16(statData->alignErrors);
+        etherStats->dot3StatsEntry.missedFrames =
+            OSSwapLittleToHostInt16(statData->rxMissed);
+        etherStats->dot3TxExtraEntry.underruns =
+            OSSwapLittleToHostInt16(statData->txUnderun);
     }
-    else
-    {
-        UInt32 tmpUlong;
-        UInt16 regAlignAddr;
-        UInt8 shiftByte;
-
-        regAlignAddr = addr & ~(0x3);
-        shiftByte = addr & (0x3);
-        tmpUlong = rtl8126_csi_other_fun_read(&linuxData, 0, regAlignAddr);
-        tmpUlong &= ~(0xFF << (8 * shiftByte));
-        tmpUlong |= (value << (8 * shiftByte));
-        rtl8126_csi_other_fun_write(&linuxData, 0, regAlignAddr, tmpUlong);
-    }
-    udelay(20);
-}
-
-void SimpleRTK5::enablePCIOffset99()
-{
-    struct rtl8126_private *tp = &linuxData;
-    u32 csi_tmp;
-
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        csiFun0WriteByte(0x99, linuxData.org_pci_offset_99);
-        
-        csi_tmp = rtl8126_mac_ocp_read(tp, 0xE032);
-        csi_tmp &= ~(BIT_0 | BIT_1);
-        if (tp->org_pci_offset_99 & (BIT_5 | BIT_6))
-            csi_tmp |= BIT_1;
-        if (tp->org_pci_offset_99 & BIT_2)
-            csi_tmp |= BIT_0;
-        rtl8126_mac_ocp_write(tp, 0xE032, csi_tmp);
-    }
-}
-
-void SimpleRTK5::disablePCIOffset99()
-{
-    struct rtl8126_private *tp = &linuxData;
-
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        rtl8126_mac_ocp_write(tp, 0xE032, rtl8126_mac_ocp_read(tp, 0xE032) & ~(BIT_0 | BIT_1));
-        csiFun0WriteByte(0x99, 0x00);
-    }
-}
-
-void SimpleRTK5::initPCIOffset99()
-{
-    struct rtl8126_private *tp = &linuxData;
-    u32 csi_tmp;
-
-    switch (tp->mcfg)
-    {
-    case CFG_METHOD_1:
-        rtl8126_mac_ocp_write(tp, 0xCDD0, 0x9003);
-        csi_tmp = rtl8126_mac_ocp_read(tp, 0xE034);
-        csi_tmp |= (BIT_15 | BIT_14);
-        rtl8126_mac_ocp_write(tp, 0xE034, csi_tmp);
-        rtl8126_mac_ocp_write(tp, 0xCDD2, 0x889C);
-        rtl8126_mac_ocp_write(tp, 0xCDD8, 0x9003);
-        rtl8126_mac_ocp_write(tp, 0xCDD4, 0x8C30);
-        rtl8126_mac_ocp_write(tp, 0xCDDA, 0x9003);
-        rtl8126_mac_ocp_write(tp, 0xCDD6, 0x9003);
-        rtl8126_mac_ocp_write(tp, 0xCDDC, 0x9003);
-        rtl8126_mac_ocp_write(tp, 0xCDE8, 0x883E);
-        rtl8126_mac_ocp_write(tp, 0xCDEA, 0x9003);
-        rtl8126_mac_ocp_write(tp, 0xCDEC, 0x889C);
-        rtl8126_mac_ocp_write(tp, 0xCDEE, 0x9003);
-        rtl8126_mac_ocp_write(tp, 0xCDF0, 0x8C09);
-        rtl8126_mac_ocp_write(tp, 0xCDF2, 0x9003);
-        csi_tmp = rtl8126_mac_ocp_read(tp, 0xE032);
-        csi_tmp |= (BIT_14);
-        rtl8126_mac_ocp_write(tp, 0xE032, csi_tmp);
-        csi_tmp = rtl8126_mac_ocp_read(tp, 0xE0A2);
-        csi_tmp |= (BIT_0);
-        rtl8126_mac_ocp_write(tp, 0xE0A2, csi_tmp);
-        break;
-        
-    case CFG_METHOD_2:
-    case CFG_METHOD_3:
-        rtl8126_mac_ocp_write(tp, 0xCDD0, 0x9003);
-        csi_tmp = rtl8126_mac_ocp_read(tp, 0xE034);
-        csi_tmp |= (BIT_15 | BIT_14);
-        rtl8126_mac_ocp_write(tp, 0xE034, csi_tmp);
-        rtl8126_mac_ocp_write(tp, 0xCDD2, 0x8C09);
-        rtl8126_mac_ocp_write(tp, 0xCDD8, 0x9003);
-        rtl8126_mac_ocp_write(tp, 0xCDD4, 0x9003);
-        rtl8126_mac_ocp_write(tp, 0xCDDA, 0x9003);
-        rtl8126_mac_ocp_write(tp, 0xCDD6, 0x9003);
-        rtl8126_mac_ocp_write(tp, 0xCDDC, 0x9003);
-        rtl8126_mac_ocp_write(tp, 0xCDE8, 0x88FA);
-        rtl8126_mac_ocp_write(tp, 0xCDEA, 0x9003);
-        rtl8126_mac_ocp_write(tp, 0xCDEC, 0x8C09);
-        rtl8126_mac_ocp_write(tp, 0xCDEE, 0x9003);
-        rtl8126_mac_ocp_write(tp, 0xCDF0, 0x8A62);
-        rtl8126_mac_ocp_write(tp, 0xCDF2, 0x9003);
-        rtl8126_mac_ocp_write(tp, 0xCDF4, 0x883E);
-        rtl8126_mac_ocp_write(tp, 0xCDF6, 0x9003);
-        csi_tmp = rtl8126_mac_ocp_read(tp, 0xE032);
-        csi_tmp |= (BIT_14);
-        rtl8126_mac_ocp_write(tp, 0xE032, csi_tmp);
-        csi_tmp = rtl8126_mac_ocp_read(tp, 0xE0A2);
-        csi_tmp |= (BIT_0);
-        rtl8126_mac_ocp_write(tp, 0xE0A2, csi_tmp);
-        break;
-    }
-    enablePCIOffset99();
-}
-
-void SimpleRTK5::setPCI99_180ExitDriverPara()
-{
-    struct rtl8126_private *tp = &linuxData;
-
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        rtl8126_issue_offset_99_event(tp);
-        disablePCIOffset99();
-        rtl8126_disable_pci_offset_180(tp);
-    }
-}
-
-void SimpleRTK5::setPCI99_ExitDriverPara()
-{
-    struct rtl8126_private *tp = &linuxData;
-
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        rtl8126_issue_offset_99_event(tp);
-        disablePCIOffset99();
-    }
-}
-
-void SimpleRTK5::hardwareD3Para()
-{
-    struct rtl8126_private *tp = &linuxData;
-
-    // 设置最大接收大小
-    WriteReg16(RxMaxSize, RX_BUF_SIZE);
-    WriteReg8(0xF1, ReadReg8(0xF1) & ~BIT_7);
-
-    // 解锁并配置 Config 寄存器以准备睡眠
-    WriteReg8(Cfg9346, ReadReg8(Cfg9346) | Cfg9346_Unlock);
-    
-    switch (tp->mcfg)
-    {
-    case CFG_METHOD_1:
-        WriteReg8(Config2, ReadReg8(Config2) & ~BIT_7);
-        WriteReg8(Config5, ReadReg8(Config5) & ~BIT_0);
-        break;
-    case CFG_METHOD_2:
-    case CFG_METHOD_3:
-        WriteReg8(INT_CFG0_8125, ReadReg8(INT_CFG0_8125) & ~BIT_3);
-        WriteReg8(Config5, ReadReg8(Config5) & ~BIT_0);
-        break;
-    }
-    WriteReg8(Cfg9346, ReadReg8(Cfg9346) & ~Cfg9346_Unlock);
-
-    rtl8126_disable_exit_l1_mask(tp);
-    setPCI99_ExitDriverPara();
-    rtl8126_disable_rxdvgate(tp);
-
-    if (tp->HwSuppExtendTallyCounterVer == 1) {
-        rtl8126_clear_mac_ocp_bit(tp, 0xEA84, (BIT_1 | BIT_0));
-    }
-}
-
-UInt16 SimpleRTK5::getEEEMode()
-{
-    struct rtl8126_private *tp = &linuxData;
-    UInt16 eee = 0;
-    UInt16 sup, adv, lpa, ena;
-
-    if (eeeCap)
-    {
-        sup = rtl8126_mdio_direct_read_phy_ocp(tp, 0xA5C4);
-        DebugLog("SimpleRTK5: EEE sup: %u\n", sup);
-
-        adv = rtl8126_mdio_direct_read_phy_ocp(tp, 0xA5D0);
-        DebugLog("SimpleRTK5: EEE adv: %u\n", adv);
-
-        lpa = rtl8126_mdio_direct_read_phy_ocp(tp, 0xA5D2);
-        DebugLog("SimpleRTK5: EEE lpa: %u\n", lpa);
-
-        ena = rtl8126_mac_ocp_read(tp, 0xE040);
-        ena &= BIT_1 | BIT_0;
-        DebugLog("SimpleRTK5: EEE ena: %u\n", ena);
-
-        eee = (sup & adv & lpa);
-    }
-    return eee;
-}
-
-void SimpleRTK5::exitOOB()
-{
-    struct rtl8126_private *tp = &linuxData;
-    UInt16 data16;
-
-    WriteReg32(RxConfig, ReadReg32(RxConfig) & ~(AcceptErr | AcceptRunt | AcceptBroadcast | AcceptMulticast | AcceptMyPhys | AcceptAllPhys));
-
-    // 禁用 RealWoL
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        rtl8126_mac_ocp_write(tp, 0xC0BC, 0x00FF);
-    }
-
-    rtl8126_nic_reset(tp);
-
-    // 禁用 Now_is_oob 状态并配置 fifo
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        rtl8126_disable_now_is_oob(tp);
-
-        data16 = rtl8126_mac_ocp_read(tp, 0xE8DE) & ~BIT_14;
-        rtl8126_mac_ocp_write(tp, 0xE8DE, data16);
-        rtl8126_wait_ll_share_fifo_ready(tp);
-
-        rtl8126_mac_ocp_write(tp, 0xC0AA, 0x07D0);
-        rtl8126_mac_ocp_write(tp, 0xC0A6, 0x01B5);
-        rtl8126_mac_ocp_write(tp, 0xC01E, 0x5555);
-
-        rtl8126_wait_ll_share_fifo_ready(tp);
-    }
-
-    // 等待 UPS 恢复
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        if (rtl8126_is_ups_resume(tp))
-        {
-            rtl8126_wait_phy_ups_resume(tp, 2);
-            rtl8126_clear_ups_resume_bit(tp);
-            rtl8126_clear_phy_ups_reg(tp);
-        }
-    }
-}
-
-void SimpleRTK5::powerDownPLL()
-{
-    struct rtl8126_private *tp = &linuxData;
-
-    // 如果启用了 WoL 或 KCP Offload，保持部分电路活动
-    if (tp->wol_enabled == WOL_ENABLED || tp->EnableKCPOffload)
-    {
-        int auto_nego;
-        int giga_ctrl;
-        u16 anlpar;
-
-        tp->check_keep_link_speed = 0;
-        rtl8126_set_hw_wol(tp, tp->wol_opts);
-
-        if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-            WriteReg8(Cfg9346, ReadReg8(Cfg9346) | Cfg9346_Unlock);
-            WriteReg8(Config2, ReadReg8(Config2) | PMSTS_En);
-            WriteReg8(Cfg9346, ReadReg8(Cfg9346) & ~Cfg9346_Unlock);
-        }
-
-        // 重置 MDIO 并配置通告能力以便在休眠期间保持连接
-        rtl8126_mdio_write(tp, 0x1F, 0x0000);
-        auto_nego = rtl8126_mdio_read(tp, MII_ADVERTISE);
-        auto_nego &= ~(ADVERTISE_10HALF | ADVERTISE_10FULL | ADVERTISE_100HALF | ADVERTISE_100FULL);
-        
-        if (test_bit(__LINK_UP, &stateFlags))
-            anlpar = tp->phy_reg_anlpar;
-        else
-            anlpar = rtl8126_mdio_read(tp, MII_LPA);
-
-        if (anlpar & (LPA_10HALF | LPA_10FULL))
-            auto_nego |= (ADVERTISE_10HALF | ADVERTISE_10FULL);
-        else
-            auto_nego |= (ADVERTISE_100FULL | ADVERTISE_100HALF | ADVERTISE_10HALF | ADVERTISE_10FULL);
-
-        giga_ctrl = rtl8126_mdio_read(tp, MII_CTRL1000) & ~(ADVERTISE_1000HALF | ADVERTISE_1000FULL);
-        rtl8126_mdio_write(tp, MII_ADVERTISE, auto_nego);
-        rtl8126_mdio_write(tp, MII_CTRL1000, giga_ctrl);
-
-        if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3)
-        {
-            int ctrl_2500;
-            ctrl_2500 = rtl8126_mdio_direct_read_phy_ocp(tp, 0xA5D4);
-            ctrl_2500 &= ~(RTK_ADVERTISE_2500FULL | RTK_ADVERTISE_5000FULL);
-            rtl8126_mdio_direct_write_phy_ocp(tp, 0xA5D4, ctrl_2500);
-        }
-        rtl8126_clear_eth_phy_ocp_bit(tp, 0xA428, BIT_9);
-        rtl8126_clear_eth_phy_ocp_bit(tp, 0xA5EA, BIT_0 | BIT_1 | BIT_2);
-        rtl8126_phy_restart_nway(tp);
-
-        WriteReg32(RxConfig, ReadReg32(RxConfig) | AcceptBroadcast | AcceptMulticast | AcceptMyPhys);
-        return;
-    }
-
-    // 彻底关闭 PHY 电源
-    rtl8126_phy_power_down(tp);
-
-    if (tp->mcfg >= CFG_METHOD_1 && tp->mcfg <= CFG_METHOD_3) {
-        WriteReg8(PMCH, ReadReg8(PMCH) & ~BIT_7);
-        WriteReg8(0xF2, ReadReg8(0xF2) & ~BIT_6);
-    }
-}
-
-void SimpleRTK5::configPhyHardware()
-{
-    struct rtl8126_private *tp = &linuxData;
-
-    if (tp->resume_not_chg_speed)
-        return;
-
-    // 复位并初始化 PHY MCU
-    tp->phy_reset_enable(tp);
-    rtl8126_init_hw_phy_mcu(tp);
-
-    // 根据版本调用具体的 PHY 配置序列
-    switch (tp->mcfg)
-    {
-    case CFG_METHOD_1:
-        configPhyHardware8126a1();
-        break;
-    case CFG_METHOD_2:
-        configPhyHardware8126a2();
-        break;
-    case CFG_METHOD_3:
-        configPhyHardware8126a3();
-        break;
-    }
-
-    // 清除传统强制模式位
-    rtl8126_clear_eth_phy_ocp_bit(tp, 0xA5B4, BIT_15);
-
-    rtl8126_mdio_write(tp, 0x1F, 0x0000);
-
-    if (HW_HAS_WRITE_PHY_MCU_RAM_CODE(tp))
-    {
-        if (tp->eee_enabled == 1)
-            rtl8126_enable_eee(tp);
-        else
-            rtl8126_disable_eee(tp);
-    }
-}
-
-void SimpleRTK5::configPhyHardware8126a1()
-{
-        struct rtl8126_private *tp = &linuxData;
-
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xA442, BIT_11);
-        // todo
-        if (aspm)
-        {
-                if (HW_HAS_WRITE_PHY_MCU_RAM_CODE(tp))
-                {
-                        rtl8126_enable_phy_aldps(tp);
-                }
-        }
-}
-
-void SimpleRTK5::configPhyHardware8126a2()
-{
-        struct rtl8126_private *tp = &linuxData;
-
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xA442, BIT_11);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x80BF);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xA438,
-                                              0xFF00,
-                                              0xED00);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x80CD);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xA438,
-                                              0xFF00,
-                                              0x1000);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x80D1);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xA438,
-                                              0xFF00,
-                                              0xC800);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x80D4);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xA438,
-                                              0xFF00,
-                                              0xC800);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x80E1);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x10CC);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x80E5);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x4F0C);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x8387);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xA438,
-                                              0xFF00,
-                                              0x4700);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xA80C,
-                                              BIT_7 | BIT_6,
-                                              BIT_7);
-
-        rtl8126_clear_eth_phy_ocp_bit(tp, 0xAC90, BIT_4);
-        rtl8126_clear_eth_phy_ocp_bit(tp, 0xAD2C, BIT_15);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8321);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x1100);
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xACF8, (BIT_3 | BIT_2));
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x8183);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xA438,
-                                              0xFF00,
-                                              0x5900);
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xAD94, BIT_5);
-        rtl8126_clear_eth_phy_ocp_bit(tp, 0xA654, BIT_11);
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xB648, BIT_14);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x839E);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x2F00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x83F2);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0800);
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xADA0, BIT_1);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x80F3);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x9900);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8126);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0xC100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x893A);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x8080);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8647);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0xE600);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x862C);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x1200);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x864A);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0xE600);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x80A0);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0xBCBC);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x805E);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0xBCBC);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8056);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x3077);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8058);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x5A00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8098);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x3077);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x809A);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x5A00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8052);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x3733);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8094);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x3733);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x807F);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x7C75);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x803D);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x7C75);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8036);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x3000);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8078);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x3000);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8031);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x3300);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8073);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x3300);
-
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xAE06,
-                                              0xFC00,
-                                              0x7C00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x89D1);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0004);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x8FBD);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xA438,
-                                              0xFF00,
-                                              0x0A00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x8FBE);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x0D09);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x89CD);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0F0F);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x89CF);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0F0F);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x83A4);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x6600);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x83A6);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x6601);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x83C0);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x6600);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x83C2);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x6601);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8414);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x6600);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8416);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x6601);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x83F8);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x6600);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x83FA);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x6601);
-
-        rtl8126_set_phy_mcu_patch_request(tp);
-
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xBD96,
-                                              0x1F00,
-                                              0x1000);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xBF1C,
-                                              0x0007,
-                                              0x0007);
-        rtl8126_clear_eth_phy_ocp_bit(tp, 0xBFBE, BIT_15);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xBF40,
-                                              0x0380,
-                                              0x0280);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xBF90,
-                                              BIT_7,
-                                              (BIT_6 | BIT_5));
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xBF90,
-                                              BIT_4,
-                                              BIT_3 | BIT_2);
-
-        rtl8126_clear_phy_mcu_patch_request(tp);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x843B);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xA438,
-                                              0xFF00,
-                                              0x2000);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x843D);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xA438,
-                                              0xFF00,
-                                              0x2000);
-
-        rtl8126_clear_eth_phy_ocp_bit(tp, 0xB516, 0x7F);
-
-        rtl8126_clear_eth_phy_ocp_bit(tp, 0xBF80, (BIT_5 | BIT_4));
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x8188);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x0044);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x00A8);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x00D6);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x00EC);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x00F6);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x00FC);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x00FE);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x00FE);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x00BC);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x0058);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x002A);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8015);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0800);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8FFD);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0000);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8FFF);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x7F00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8FFB);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8FE9);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0002);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8FEF);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x00A5);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8FF1);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0106);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8FE1);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0102);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8FE3);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0400);
-
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xA654, BIT_11);
-        rtl8126_clear_eth_phy_ocp_bit(tp, 0XA65A, (BIT_1 | BIT_0));
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xAC3A, 0x5851);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0XAC3C,
-                                              BIT_15 | BIT_14 | BIT_12,
-                                              BIT_13);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xAC42,
-                                              BIT_9,
-                                              BIT_8 | BIT_7 | BIT_6);
-        rtl8126_clear_eth_phy_ocp_bit(tp, 0xAC3E, BIT_15 | BIT_14 | BIT_13);
-        rtl8126_clear_eth_phy_ocp_bit(tp, 0xAC42, BIT_5 | BIT_4 | BIT_3);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xAC42,
-                                              BIT_1,
-                                              BIT_2 | BIT_0);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xAC1A, 0x00DB);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xADE4, 0x01B5);
-        rtl8126_clear_eth_phy_ocp_bit(tp, 0xAD9C, BIT_11 | BIT_10);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x814B);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x1100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x814D);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x1100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x814F);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0B00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8142);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8144);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8150);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8118);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0700);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x811A);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0700);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x811C);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0500);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x810F);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8111);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x811D);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0100);
-
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xAC36, BIT_12);
-        rtl8126_clear_eth_phy_ocp_bit(tp, 0xAD1C, BIT_8);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xADE8,
-                                              0xFFC0,
-                                              0x1400);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x864B);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x9D00);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x8F97);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x003F);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x3F02);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x023C);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x3B0A);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x1C00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x0000);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x0000);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x0000);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x0000);
-
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xAD9C, BIT_5);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8122);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0C00);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x82C8);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03ED);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03FF);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0009);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03FE);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x000B);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0021);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03F7);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03B8);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03E0);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0049);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0049);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03E0);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03B8);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03F7);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0021);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x000B);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03FE);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0009);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03FF);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03ED);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x80EF);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0C00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x82A0);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x000E);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03FE);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03ED);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0006);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x001A);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03F1);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03D8);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0023);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0054);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0322);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x00DD);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03AB);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03DC);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0027);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x000E);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03E5);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03F9);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0012);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0001);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03F1);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x8018);
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xA438, BIT_13);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8FE4);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0000);
-
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB54C,
-                                              0xFFC0,
-                                              0x3700);
-
-        if (aspm)
-        {
-                if (HW_HAS_WRITE_PHY_MCU_RAM_CODE(tp))
-                {
-                        rtl8126_enable_phy_aldps(tp);
-                }
-        }
-}
-
-void SimpleRTK5::configPhyHardware8126a3()
-{
-        struct rtl8126_private *tp = &linuxData;
-
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xA442, BIT_11);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x8183);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xA438,
-                                              0xFF00,
-                                              0x5900);
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xA654, BIT_11);
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xB648, BIT_14);
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xAD2C, BIT_15);
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xAD94, BIT_5);
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xADA0, BIT_1);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xAE06,
-                                              BIT_15 | BIT_14 | BIT_13 | BIT_12 | BIT_11 | BIT_10,
-                                              BIT_14 | BIT_13 | BIT_12 | BIT_11 | BIT_10);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8647);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0xE600);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8036);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x3000);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8078);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x3000);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x89E9);
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xB87E, 0xFF00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8FFD);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8FFE);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0200);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8FFF);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0400);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x8018);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xA438,
-                                              0xFF00,
-                                              0x7700);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x8F9C);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x0005);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x0000);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x00ED);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x0502);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x0B00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0xD401);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x8FA8);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xA438,
-                                              0xFF00,
-                                              0x2900);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x814B);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x1100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x814D);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x1100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x814F);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0B00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8142);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8144);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8150);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0100);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8118);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0700);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x811A);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0700);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x811C);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0500);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x810F);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8111);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0100);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x811D);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0100);
-
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xAD1C, BIT_8);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xADE8,
-                                              BIT_15 | BIT_14 | BIT_13 | BIT_12 | BIT_11 | BIT_10 | BIT_9 | BIT_8 | BIT_7 | BIT_6,
-                                              BIT_12 | BIT_10);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x864B);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x9D00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x862C);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x1200);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA436, 0x8566);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x003F);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x3F02);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x023C);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x3B0A);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x1C00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x0000);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x0000);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x0000);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xA438, 0x0000);
-
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xAD9C, BIT_5);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8122);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0C00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x82C8);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03ED);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03FF);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0009);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03FE);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x000B);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0021);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03F7);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03B8);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03E0);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0049);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0049);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03E0);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03B8);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03F7);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0021);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x000B);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03FE);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0009);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03FF);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03ED);
-
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x80EF);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x0C00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x82A0);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x000E);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03FE);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03ED);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0006);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x001A);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03F1);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03D8);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0023);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0054);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0322);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x00DD);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03AB);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03DC);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0027);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x000E);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03E5);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03F9);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0012);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x0001);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87E, 0x03F1);
-
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xA430, BIT_1 | BIT_0);
-
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB54C,
-                                              0xFFC0,
-                                              0x3700);
-
-        rtl8126_set_eth_phy_ocp_bit(tp, 0xB648, BIT_6);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x8082);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x5D00);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x807C);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x5000);
-        rtl8126_mdio_direct_write_phy_ocp(tp, 0xB87C, 0x809D);
-        rtl8126_clear_and_set_eth_phy_ocp_bit(tp,
-                                              0xB87E,
-                                              0xFF00,
-                                              0x5000);
-
-        if (aspm && HW_HAS_WRITE_PHY_MCU_RAM_CODE(tp))
-                rtl8126_enable_phy_aldps(tp);
 }
