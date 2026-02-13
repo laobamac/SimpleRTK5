@@ -1,17 +1,17 @@
 <div align="center">
 
 # SimpleRTK5
-### Realtek RTL8126 5GbE Driver for macOS
+### Realtek RTL8125/8126 2.5/5GbE Driver for macOS
 
 [![Platform](https://img.shields.io/badge/Platform-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://www.apple.com/macos)
-[![Chipset](https://img.shields.io/badge/Chipset-RTL8126-005696?style=for-the-badge&logo=realtek&logoColor=white)](https://www.realtek.com)
-[![Speed](https://img.shields.io/badge/Speed-5GbE-76B900?style=for-the-badge&logo=speedtest&logoColor=white)]()
+[![Chipset](https://img.shields.io/badge/Chipset-RTL8125/8126-005696?style=for-the-badge&logo=realtek&logoColor=white)](https://www.realtek.com)
+[![Speed](https://img.shields.io/badge/Speed-2.5/5GbE-76B900?style=for-the-badge&logo=speedtest&logoColor=white)]()
 [![Language](https://img.shields.io/badge/Language-C++%20%7C%20Objective--C-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)]()
-[![License](https://img.shields.io/badge/License-GPL_v3-red?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/License-GPL_v2-red?style=for-the-badge)](LICENSE)
 [![Build Status](https://img.shields.io/badge/Build-Passing-success?style=for-the-badge)]()
 
 <p align="center">
-  <b>SimpleRTK5</b> is a high-performance open-source kernel extension (kext) enabling support for the <b>Realtek RTL8126 5GbE</b> Ethernet controller on macOS.
+  <b>SimpleRTK5</b> is a high-performance open-source kernel extension (kext) enabling support for the <b>Realtek RTL8125/8126 2.5/5GbE</b> Ethernet controller on macOS.
   <br />
   Designed for Hackintosh builds and real Macs using PCIe adapters.
 </p>
@@ -22,48 +22,64 @@
 
 ---
 
-<div id="english"></div>
+## ✨ Features
 
-##  English
+* 🚀 **Native Support**: Fully compatible with macOS network stack.(Support AppleVTD)
+* ⚡️ **High Speed**: Supports **2.5Gbps** (RTL8125 series) and **5Gbps** (RTL8126 series) link speeds.
+* 🛠 **Advanced Config**: Supports ASPM (Active State Power Management) and TSO (TCP Segmentation Offload).
+* 🔧 **Customizable**: Adjustable polling times for different link speeds via boot arguments or device properties.
 
-### ✨ Features
+## 🖥 Supported Hardware
 
-* **Full 5GbE Support:** Native support for 5000Mbps link speeds, with auto-negotiation down to 2.5Gbps, 1Gbps, 100Mbps, and 10Mbps.
-* **Hardware Offloading:** Supports TCP Segmentation Offload (TSO4/TSO6) and Checksum Offload (CSO6) for reduced CPU usage.
-* **Energy Efficient:** Implements Energy Efficient Ethernet (EEE) support (configurable).
-* **Native Integration:** Fully integrates with macOS `IONetworkingFamily`, supporting Network Preference Pane, jumbo frames, and multicast.
-* **System Stability:** Optimized interrupt handling and memory management to prevent kernel panics.
+This driver supports the following Realtek PCIe Ethernet Controllers:
 
-### 🚀 Installation
+| Chipset Series | Speed | PCI ID (Vendor:Device) |
+| :--- | :--- | :--- |
+| **RTL8125** | 2.5 Gbit/s | `0x10EC:0x8125`, `0x10EC:0x3000` |
+| **RTL8126** | 5 Gbit/s | `0x10EC:0x8126`, `0x10EC:0x5000` |
+| **RTL8125 (Killer)** | 2.5 Gbit/s | `0x1186:0x8125` |
 
-#### For OpenCore Users (Recommended)
+## 📥 Installation
 
-1.  Download the latest release of `SimpleRTK5.kext`.
-2.  Copy the kext to your EFI partition: `EFI/OC/Kexts/`.
-3.  Add the kext to your `config.plist` (Snapshot your folder using ProperTree or add manually).
-4.  **Requirements:**
-    * macOS Catalina (10.15) or newer (Tested on Sequoia).
-    * `IOPCIFamily` and `IONetworkingFamily` (Standard in macOS).
+### OpenCore (Recommended)
 
-#### Boot Arguments & Properties
+1.  Download the latest release from the [Releases](https://github.com/laobamac/SimpleRTK5/releases) page.
+2.  Copy `SimpleRTK5.kext` to your `EFI/OC/Kexts` folder.
+3.  Add the kext entry to your `config.plist` (Kernel -> Add).
+4.  **Optional**: Configure boot arguments if needed (see below).
+5.  Reboot.
 
-You can customize the driver behavior by adding entries to `DeviceProperties` in your `config.plist` for the PCI path of your Ethernet card.
+### Clover
 
-| Key | Type | Default | Description |
+1.  Download the latest release.
+2.  Copy `SimpleRTK5.kext` to `EFI/CLOVER/kexts/Other`.
+3.  Reboot.
+
+## ⚙️ Configuration & Boot Arguments
+
+You can customize the driver behavior using boot arguments or `DeviceProperties` in your bootloader config.
+
+| Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `disableASPM` | Boolean | `true` | Disables Active State Power Management. Keep `true` for stability. |
-| `enableEEE` | Boolean | `true` | Enables Energy Efficient Ethernet. Set `false` if you experience lag. |
-| `enableTSO4` | Boolean | `true` | IPv4 TCP Segmentation Offload. |
-| `enableTSO6` | Boolean | `true` | IPv6 TCP Segmentation Offload. |
-| `enableCSO6` | Boolean | `true` | IPv6 Checksum Offload. |
-| `µsPollInt2500`| Number | `110` | Polling interval tuning for high load. |
+| `enableASPM` | Boolean | `True` | Enables Active State Power Management. Set to `False` if you experience instability. |
+| `enableTSO4` | Boolean | `False` | Enables TCP Segmentation Offload for IPv4. |
+| `enableTSO6` | Boolean | `False` | Enables TCP Segmentation Offload for IPv6. |
+| `µsPollTime2G` | Integer | `160` | Polling interval (microseconds) for 2.5G connection. |
+| `µsPollTime5G` | Integer | `120` | Polling interval (microseconds) for 5G connection. |
 
-### 🛠 Building from Source
-
+**Example Boot Argument:**
 ```bash
-# Clone the repository
-git clone https://github.com/laobamac/SimpleRTK5.git
-cd SimpleRTK5
+-srtk5noaspm   # (Hypothetical example if bool args are implemented as flags, otherwise use DeviceProperties)
 
-# Build using Xcode
-xcodebuild -project SimpleRTK5.xcodeproj -configuration Release
+```
+
+*Note: It is recommended to set these values via `DeviceProperties` in OpenCore `config.plist` under the PCI path of your ethernet card.*
+
+## 👏 Credits
+
+* **Realtek** for the original Linux driver source code.
+* **Laura Müller** for the initial porting work.
+
+---
+
+<p align="center">Made with ❤️ for the Hackintosh Community</p>

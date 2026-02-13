@@ -1,59 +1,80 @@
+<div align="center">
+
 # SimpleRTK5
-macOS's RTL8126 5G Ethernet card driver
+### 适用于macOS的Realtek RTL8125/8126 2.5/5GbE网卡驱动
 
-### ✨ 主要功能
+[![平台](https://img.shields.io/badge/平台-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://www.apple.com/macos)
+[![芯片](https://img.shields.io/badge/芯片-RTL8125/8126-005696?style=for-the-badge&logo=realtek&logoColor=white)](https://www.realtek.com)
+[![速率](https://img.shields.io/badge/速率-2.5/5GbE-76B900?style=for-the-badge&logo=speedtest&logoColor=white)]()
+[![语言](https://img.shields.io/badge/语言-C++%20%7C%20Objective--C-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)]()
+[![许可证](https://img.shields.io/badge/许可证-GPL_v2-red?style=for-the-badge)](LICENSE)
+[![构建状态](https://img.shields.io/badge/构建-成功-success?style=for-the-badge)]()
 
-* **原生 5GbE 支持：** 支持 5000Mbps 连接速率，并向下兼容 2.5Gbps、1Gbps、100Mbps 和 10Mbps。
-* **硬件卸载 (Offloading)：** 支持 TCP 分段卸载 (TSO4/TSO6) 和校验和卸载 (CSO6)，显著降低 CPU 占用率。
-* **节能以太网：** 支持 EEE (Energy Efficient Ethernet) 节能技术。
-* **原生系统集成：** 基于 `IONetworkingFamily` 开发，支持系统“网络”偏好设置、巨型帧 (Jumbo Frames) 和多播。
-* **高稳定性：** 优化的中断处理和内存管理，防止在高负载下系统崩溃。
+<p align="center">
+  <b>SimpleRTK5</b> 是一个高性能的开源内核扩展(kext)，为macOS系统提供对<b>Realtek RTL8125/8126 2.5/5GbE</b>以太网控制器的原生支持。
+  <br />
+  专为黑苹果(Hackintosh)系统和使用PCIe适配器的苹果真机设计。
+</p>
 
-### 🚀 安装指南
+[English](README.md)
 
-#### OpenCore 用户 (推荐)
-
-1. 下载最新发布的 `SimpleRTK5.kext`。
-2. 将驱动文件复制到 EFI 分区的 `EFI/OC/Kexts/` 目录下。
-3. 在 `config.plist` 中启用该驱动（建议使用 ProperTree 进行 OC Snapshot）。
-4. **系统要求：**
-* macOS Catalina (10.15) 或更高版本（已在 macOS Sequoia 上测试）。
-
-
-
-#### 驱动配置参数
-
-您可以通过 OpenCore 的 `config.plist` 中的 `DeviceProperties` 为网卡路径添加以下参数来调整驱动行为：
-
-| 键名 (Key) | 类型 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `disableASPM` | Boolean | `true` | 禁用活动状态电源管理。建议保持 `true` 以确保稳定性。 |
-| `enableEEE` | Boolean | `true` | 启用节能以太网。如果遇到网络卡顿或断流，可尝试设为 `false`。 |
-| `enableTSO4` | Boolean | `true` | 启用 IPv4 TCP 分段卸载。 |
-| `enableTSO6` | Boolean | `true` | 启用 IPv6 TCP 分段卸载。 |
-| `enableCSO6` | Boolean | `true` | 启用 IPv6 校验和卸载。 |
-| `µsPollInt2500` | Number | `110` | 轮询间隔微秒数，用于优化高吞吐量下的性能。 |
-
-### 🛠 源码编译
-
-```bash
-# 克隆项目仓库
-git clone https://github.com/laobamac/SimpleRTK5.git
-cd SimpleRTK5
-
-# 使用 Xcode 编译
-xcodebuild -project SimpleRTK5.xcodeproj -configuration Release
-
-```
-
-### 📝 致谢与版权
-
-* **作者：** 王孝慈 (laobamac)
-* **版权所有：** Copyright © 2025 王孝慈. All rights reserved.
-* **核心参考：** 基于 Linux r8126 驱动源码移植与改进。
+</div>
 
 ---
 
-<div align="center">
-<p>Made with ❤️ for the Hackintosh Community</p>
-</div>
+## ✨ 功能特点
+
+* 🚀 **原生支持**：完美兼容macOS网络协议栈（支持AppleVTD）
+* ⚡️ **高速传输**：支持**2.5Gbps**（RTL8125系列）和**5Gbps**（RTL8126系列）连接速率
+* 🛠 **高级配置**：支持ASPM（主动电源状态管理）和TSO（TCP分段卸载）
+* 🔧 **灵活定制**：可通过引导参数或设备属性为不同连接速率调整轮询时间
+
+## 🖥 支持的硬件
+
+本驱动支持以下Realtek PCIe以太网控制器：
+
+| 芯片系列 | 速率 | PCI ID（厂商:设备） |
+| :--- | :--- | :--- |
+| **RTL8125** | 2.5 Gbit/s | `0x10EC:0x8125`, `0x10EC:0x3000` |
+| **RTL8126** | 5 Gbit/s | `0x10EC:0x8126`, `0x10EC:0x5000` |
+| **RTL8125（Killer版）** | 2.5 Gbit/s | `0x1186:0x8125` |
+
+## 📥 安装方法
+
+### OpenCore（推荐）
+
+1.  从[发布页面](https://github.com/laobamac/SimpleRTK5/releases)下载最新版本
+2.  将 `SimpleRTK5.kext` 复制到 `EFI/OC/Kexts` 文件夹
+3.  在 `config.plist` 中添加内核扩展条目（Kernel -> Add）
+4.  **可选**：根据需要配置引导参数（见下文）
+5.  重启系统
+
+### Clover
+
+1.  下载最新版本
+2.  将 `SimpleRTK5.kext` 复制到 `EFI/CLOVER/kexts/Other`
+3.  重启系统
+
+## ⚙️ 配置与引导参数
+
+您可以通过引导参数或引导配置文件中的 `DeviceProperties` 来自定义驱动程序行为。
+
+| 参数 | 类型 | 默认值 | 描述 |
+| :--- | :--- | :--- | :--- |
+| `enableASPM` | 布尔值 | `True` | 启用主动电源状态管理。如遇不稳定情况可设为 `False` |
+| `enableTSO4` | 布尔值 | `False` | 启用IPv4 TCP分段卸载 |
+| `enableTSO6` | 布尔值 | `False` | 启用IPv6 TCP分段卸载 |
+| `µsPollTime2G` | 整数 | `160` | 2.5G连接时的轮询间隔（微秒） |
+| `µsPollTime5G` | 整数 | `120` | 5G连接时的轮询间隔（微秒） |
+
+**引导参数示例：**
+```bash
+-srtk5noaspm   # （示例，如布尔参数通过标志实现；否则请使用设备属性设置）
+```
+
+*注意：建议在OpenCore的`config.plist`中通过`DeviceProperties`，在网卡对应的PCI路径下设置这些值。*
+
+## 👏 致谢
+
+* **Realtek** 提供原始的Linux驱动源代码
+* **Laura Müller** 完成的初始移植工作
