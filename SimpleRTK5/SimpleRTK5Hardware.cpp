@@ -463,6 +463,31 @@ void SimpleRTK5::rtl812xEnable() {
     RTL_W32(tp, IMR0_8125, intrMask);
 }
 
+void SimpleRTK5::rtl812xSetOffloadFeatures(bool active) {
+    ifnet_t ifnet = netif->getIfnet();
+    ifnet_offload_t offload;
+    UInt32 mask = 0;
+
+    if (enableTSO4)
+        mask |= IFNET_TSO_IPV4;
+
+    if (enableTSO6)
+        mask |= IFNET_TSO_IPV6;
+
+    offload = ifnet_offload(ifnet);
+
+    if (active) {
+        offload |= mask;
+        DebugLog("SimpleRTK5: Enable hardware offload features: %x!\n", mask);
+    } else {
+        offload &= ~mask;
+        DebugLog("SimpleRTK5: Disable hardware offload features: %x!\n", mask);
+    }
+
+    if (ifnet_set_offload(ifnet, offload))
+        IOLog("SimpleRTK5: Error setting hardware offload: %x!\n", offload);
+}
+
 void SimpleRTK5::rtl812xSetMrrs(struct srtk5_private *tp, UInt8 setting) {
     UInt8 devctl;
 
@@ -590,7 +615,10 @@ void SimpleRTK5::rtl812xHwConfig(struct srtk5_private *tp) {
     srtk5_set_mac_ocp_bit(tp, 0xEA84, (BIT_1 | BIT_0));
 
     /* Setup the descriptor rings. */
+#ifdef ENABLE_TX_NO_CLOSE
     txTailPtr0 = txClosePtr0 = 0;
+#endif
+
     txNextDescIndex = txDirtyDescIndex = 0;
     txNumFreeDesc = kNumTxDesc;
     rxNextDescIndex = 0;
@@ -605,8 +633,10 @@ void SimpleRTK5::rtl812xHwConfig(struct srtk5_private *tp) {
             (TX_DMA_BURST_unlimited << TxDMAShift) |
                 (InterFrameGap << TxInterFrameGapShift));
 
+#ifdef ENABLE_TX_NO_CLOSE
     /* Enable TxNoClose. */
     RTL_W32(tp, TxConfig, (RTL_R32(tp, TxConfig) | BIT_6));
+#endif
 
     /* Disable double VLAN. */
     RTL_W16(tp, DOUBLE_VLAN_CONFIG, 0);
@@ -810,6 +840,7 @@ void SimpleRTK5::rtl812xHwConfig(struct srtk5_private *tp) {
     udelay(10);
 }
 
+#ifdef ENABLE_TX_NO_CLOSE
 UInt32 SimpleRTK5::rtl812xGetHwCloPtr(struct srtk5_private *tp) {
     UInt32 cloPtr;
 
@@ -827,6 +858,7 @@ void SimpleRTK5::rtl812xDoorbell(struct srtk5_private *tp, UInt32 txTailPtr) {
     else
         RTL_W16(tp, tp->SwTailPtrReg, txTailPtr & 0xffff);
 }
+#endif
 
 void SimpleRTK5::getChecksumResult(mbuf_t m, UInt32 status1, UInt32 status2) {
     mbuf_csum_performed_flags_t performed = 0;
@@ -844,13 +876,34 @@ void SimpleRTK5::getChecksumResult(mbuf_t m, UInt32 status1, UInt32 status2) {
         mbuf_set_csum_performed(m, performed, value);
 }
 
-UInt32 SimpleRTK5::updateTimerValue(UInt32 status) {
+UInt32 SimpleRTK5::updateTimerValue(struct srtk5_private *tp, UInt32 status) {
     UInt32 newTimerValue = 0;
 
     if (status & (RxOK | TxOK)) {
+        if (tp->speed < SPEED_1000) {
+            newTimerValue = kTimerBulk;
+            goto done;
+        }
+        if (mtu > MSS_MAX) {
+            if ((totalDescs > 96) || (totalDescs < 4))
+                newTimerValue = kTimerLat2;
+            else
+                newTimerValue = kTimerDefault;
+
+            goto done;
+        }
+        if ((totalDescs > 4) && (totalBytes / totalDescs) > 2000) {
+            newTimerValue = kTimerBulk;
+            goto done;
+        }
+        if ((totalDescs > 35) || (totalBytes < 1500)) {
+            newTimerValue = kTimerLat1;
+            goto done;
+        }
         newTimerValue = kTimerDefault;
     }
 
+done:
 #ifdef DEBUG_INTR
     if (status & PCSTimeout)
         tmrInterrupts++;
@@ -951,13 +1004,19 @@ void SimpleRTK5::rtl812xGetEEEMode(struct srtk5_private *tp) {
     UInt16 val;
 
     /* Get supported EEE. */
-    val = srtk5_mdio_direct_read_phy_ocp(tp, 0xA5C4);
-    sup = mmd_eee_cap_to_ethtool_sup_t(val);
+    // val = srtk5_mdio_direct_read_phy_ocp(tp, 0xA5C4);
+    // sup = mmd_eee_cap_to_ethtool_sup_t(val);
+    sup = tp->eee.supported;
     DebugLog("SimpleRTK5: EEE supported: %u\n", sup);
 
     /* Get advertisement EEE */
     val = srtk5_mdio_direct_read_phy_ocp(tp, 0xA5D0);
     adv = mmd_eee_adv_to_ethtool_adv_t(val);
+    val = srtk5_mdio_direct_read_phy_ocp(tp, 0xA6D4);
+
+    if (val & RTK_EEE_ADVERTISE_2500FULL)
+        adv |= ADVERTISED_2500baseX_Full;
+
     DebugLog("SimpleRTK5: EEE advertised: %u\n", adv);
 
     /* Get LP advertisement EEE */

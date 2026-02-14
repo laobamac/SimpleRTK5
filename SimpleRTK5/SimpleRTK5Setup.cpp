@@ -186,9 +186,9 @@ void SimpleRTK5::getParams()
         enableTSO4 = false;
         enableTSO6 = false;
         enableASPM = false;
-        pollTime10G = 60000;
-        pollTime5G = 90000;
-        pollTime2G = 110000;
+        pollTime10G = 100000;
+        pollTime5G = 120000;
+        pollTime2G = 160000;
     }
     if (versionString)
         IOLog("SimpleRTK5: Version %s\n", versionString->getCStringNoCopy());
@@ -205,7 +205,8 @@ bool SimpleRTK5::setupMediumDict()
     if (HW_SUPP_PHY_LINK_SPEED_5000M(tp))
         limit = MIDX_10000FD;
     else if (HW_SUPP_PHY_LINK_SPEED_2500M(tp))
-        limit = MIDX_5000FD;
+        //limit = MIDX_5000FD;
+        limit = (tp->mcfg < CFG_METHOD_4) ? MIDX_2500FD_EEE : MIDX_5000FD;
     else
         limit = MIDX_2500FD;
     
@@ -495,7 +496,11 @@ bool SimpleRTK5::setupTxResources()
     txDescArray[kTxLastDesc].opts1 = OSSwapHostToLittleInt32(RingEnd);
     
     txNextDescIndex = txDirtyDescIndex = 0;
+    
+#ifdef ENABLE_TX_NO_CLOSE
     txTailPtr0 = txClosePtr0 = 0;
+#endif
+
     txNumFreeDesc = kNumTxDesc;
     
     if (useAppleVTD) {
@@ -714,13 +719,17 @@ void SimpleRTK5::clearRxTxRings()
         m = txBufArray[i].mbuf;
         
         if (m) {
-            freePacket(m);
+            mbuf_freem_list(m);
             txBufArray[i].mbuf = NULL;
             txBufArray[i].numDescs = 0;
             txBufArray[i].packetBytes = 0;
         }
     }
+    
+#ifdef ENABLE_TX_NO_CLOSE
     txTailPtr0 = txClosePtr0 = 0;
+#endif
+
     txDirtyDescIndex = txNextDescIndex = 0;
     txNumFreeDesc = kNumTxDesc;
         
